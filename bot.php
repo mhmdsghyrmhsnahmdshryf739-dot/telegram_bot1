@@ -263,7 +263,7 @@ elseif (preg_match('/^logout_account_(\d+)$/', $data, $match)) {
     editMessage($chat_id, $msg_id, "🚫 الحساب غير متوفر بعد الآن.");
     exit;
 }
-
+} 
 // ===================== معالجة الرسائل النصية (تخزين حساب جديد) =====================
 if ($message && !$callback) {
     $text = trim($message['text'] ?? '');
