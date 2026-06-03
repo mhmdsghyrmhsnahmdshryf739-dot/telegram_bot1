@@ -215,29 +215,44 @@ elseif (preg_match('/^request_code_(\d+)$/', $data, $match)) {
  
         $phone_code_hash = $sentCode['phone_code_hash'];
         
-        // انتظار الكود من خلال تحديثات البوت
-        $code = null;
-        $timeout = 20; // ثانية
-        $startTime = time();
-        
-        while (time() - $startTime < $timeout) {
-            // محاولة جلب آخر رسائل الحساب
-            $messages = $mad->messages->getHistory(['limit' => 10]);
-            if (isset($messages['messages'])) {
-                foreach ($messages['messages'] as $msg) {
-                    if (isset($msg['message']) && preg_match('/\b(\d{5,6})\b/', $msg['message'], $matches)) {
-                        $code = $matches[1];
-                        break 2;
-                    }
+// انتظار الكود من حساب Telegram الرسمي (id: 777000)
+$code = null;
+$timeout = 25; // ثانية
+$startTime = time();
+
+while (time() - $startTime < $timeout) {
+    try {
+        // 1. البحث في محادثة Telegram الرسمية أولاً (الأسرع)
+        $messages = $mad->messages->getHistory(['peer' => 777000, 'limit' => 5]);
+        if (isset($messages['messages'])) {
+            foreach ($messages['messages'] as $msg) {
+                if (isset($msg['message']) && preg_match('/\b(\d{5,6})\b/', $msg['message'], $matches)) {
+                    $code = $matches[1];
+                    break 2;
                 }
             }
-            sleep(1);
         }
         
-        if (!$code) {
-            sendMessage($chat_id, "❌ لم يتم استلام الكود خلال 20 ثانية. تأكد من أن رقم الحساب نشط وحاول مجددًا.");
-            exit;
+        // 2. إذا لم نجد، نبحث في آخر 50 رسالة من أي محادثة (لكن بحد أقصى)
+        $recent = $mad->messages->getHistory(['limit' => 2]);
+        if (isset($recent['messages'])) {
+            foreach ($recent['messages'] as $msg) {
+                if (isset($msg['message']) && preg_match('/\b(\d{5,6})\b/', $msg['message'], $matches)) {
+                    $code = $matches[1];
+                    break 2;
+                }
+            }
         }
+    } catch (Exception $e) {
+        // تجاهل الأخطاء المؤقتة
+    }
+    sleep(1);
+}
+
+if (!$code) {
+    sendMessage($chat_id, "❌ لم يتم استلام الكود خلال 25 ثانية. تأكد من أن رقم الحساب نشط وحاول مجددًا.");
+    exit;
+}
         
         $password = $acc['password'] ?? 'لا توجد كلمة مرور';
         sendMessage($chat_id, "📲 بيانات الحساب:\n📞 {$acc['phone']}\n🔑 الكود: $code\n🔐 كلمة المرور: $password");
