@@ -293,30 +293,59 @@ elseif (preg_match('/^logout_account_(\d+)$/', $data, $match)) {
 // ===================== معالجة الرسائل النصية (تخزين حساب جديد) =====================
 if ($message && !$callback) {
     $text = trim($message['text'] ?? '');
-// ✅ أمر النسخ الاحتياطي /backup
-if ($text === '/backup') {
-    if (!file_exists(DB_PATH)) {
-        sendMessage($chat_id, "❌ قاعدة البيانات غير موجودة!");
+// ✅ أمر النسخ الاحتياطي الكامل /backup_all
+if ($text === '/backup_all') {
+    // اسم ملف ZIP النهائي
+    $zip_name = "/tmp/backup_full_" . date('Ymd_His') . ".zip";
+    $zip = new ZipArchive();
+    if ($zip->open($zip_name, ZipArchive::CREATE) !== TRUE) {
+        sendMessage($chat_id, "❌ فشل إنشاء ملف ZIP.");
         exit;
     }
-    // إرسال قاعدة البيانات numbers.db
-    $dbFile = new CURLFile(DB_PATH);
-    botApi('sendDocument', ['chat_id' => $chat_id, 'document' => $dbFile]);
-    
-    // ضغط مجلد الجلسات وإرساله
-    $zip = new ZipArchive();
-    $zip_name = "/tmp/sessions_backup.zip";
-    if ($zip->open($zip_name, ZipArchive::CREATE) === TRUE) {
-        $files = glob(SESSIONS_PATH . "*.madeline");
+
+    // المجلد الذي نريد ضغطه (المجلد الحالي للبوت)
+    $source_dir = __DIR__; // مجلد البوت الحالي (عادة /opt/render/project/src)
+
+    // استبعاد المجلدات والملفات التي لا نحتاجها أو التي تسبب أخطاء
+    $exclude_dirs = ['/tmp', '/proc', '/sys', '/dev', '/var', '/run', '/etc', '/usr'];
+    $exclude_files = ['.env', '.gitignore', '.git/'];
+
+    // دالة لإضافة الملفات والمجلدات بشكل متكرر (recursive)
+    function addFilesToZip($dir, $zip, $exclude_dirs, $exclude_files) {
+        $files = scandir($dir);
         foreach ($files as $file) {
-            $zip->addFile($file, basename($file));
+            if ($file == '.' || $file == '..') continue;
+            $path = $dir . '/' . $file;
+            // تجاهل المجلدات والمقالات المستبعدة
+            $skip = false;
+            foreach ($exclude_dirs as $ex) {
+                if (strpos($path, $ex) !== false) { $skip = true; break; }
+            }
+            foreach ($exclude_files as $exf) {
+                if (strpos($path, $exf) !== false) { $skip = true; break; }
+            }
+            if ($skip) continue;
+            if (is_dir($path)) {
+                $zip->addEmptyDir(str_replace(__DIR__ . '/', '', $path));
+                addFilesToZip($path, $zip, $exclude_dirs, $exclude_files);
+            } elseif (is_file($path)) {
+                $zip->addFile($path, str_replace(__DIR__ . '/', '', $path));
+            }
         }
-        $zip->close();
+    }
+
+    // بدء الضغط
+    addFilesToZip($source_dir, $zip, $exclude_dirs, $exclude_files);
+    $zip->close();
+
+    // إرسال الملف إلى المستخدم
+    if (file_exists($zip_name) && filesize($zip_name) > 0) {
         $zipFile = new CURLFile($zip_name);
         botApi('sendDocument', ['chat_id' => $chat_id, 'document' => $zipFile]);
-        unlink($zip_name);
+        sendMessage($chat_id, "✅ تم إرسال النسخة الاحتياطية الكاملة (حجم: " . round(filesize($zip_name)/1024/1024, 2) . " ميجابايت).");
+        unlink($zip_name); // حذف الملف من الخادم بعد الإرسال لتوفير المساحة
     } else {
-        sendMessage($chat_id, "❌ فشل ضغط ملفات الجلسات.");
+        sendMessage($chat_id, "❌ فشل إنشاء ملف ZIP أو الملف فارغ.");
     }
     exit;
 }
