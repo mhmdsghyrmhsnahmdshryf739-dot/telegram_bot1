@@ -191,6 +191,14 @@ elseif (preg_match('/^request_code_(\d+)$/', $data, $match)) {
         exit;
     }
     
+    // ✅ فحص وجود ملف الجلسة
+    if (!file_exists($acc['session_file'])) {
+        sendMessage($chat_id, "❌ ملف الجلسة مفقود: " . basename($acc['session_file']) . "\nقد يكون الحساب تالفاً. قم بحذفه وإعادة تخزينه.");
+        // حذف الحساب من المخزون تلقائياً
+        $db->prepare("UPDATE accounts SET status='removed' WHERE id=?")->execute([$acc_id]);
+        exit;
+    }
+    
     // إعدادات MadelineProto
     $settings = new Settings();
     $appInfo = new AppInfo();
@@ -204,6 +212,7 @@ elseif (preg_match('/^request_code_(\d+)$/', $data, $match)) {
     try {
         // طلب إرسال كود الدخول إلى رقم الحساب
         $sentCode = $mad->phoneLogin($acc['phone']);
+ 
         $phone_code_hash = $sentCode['phone_code_hash'];
         
         // انتظار الكود من خلال تحديثات البوت
@@ -263,7 +272,9 @@ elseif (preg_match('/^logout_account_(\d+)$/', $data, $match)) {
     editMessage($chat_id, $msg_id, "🚫 الحساب غير متوفر بعد الآن.");
     exit;
 }
-} 
+} // <- هذا القوس المفقود
+
+
 // ===================== معالجة الرسائل النصية (تخزين حساب جديد) =====================
 if ($message && !$callback) {
     $text = trim($message['text'] ?? '');
