@@ -1,5 +1,6 @@
 <?php
-// bot.php - النسخة الكاملة (أزرار، تخزين، شراء، مخزون، تسجيل خروج)
+require_once __DIR__ . '/vendor/autoload.php';
+// bot.php - النسخة النهائية مع مكتبة libphonenumber
 require __DIR__ . '/madeline.php';
 require __DIR__ . '/config.php';
 
@@ -10,20 +11,16 @@ use danog\MadelineProto\Settings;
 $db = new PDO('sqlite:' . DB_PATH);
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
+// إنشاء جدول الدول (فارغ - سيتم ملؤه تلقائياً)
 $db->exec("
 CREATE TABLE IF NOT EXISTS countries (
     code TEXT PRIMARY KEY,
     name TEXT,
     flag TEXT
 );
-INSERT OR IGNORE INTO countries (code, name, flag) VALUES 
-('ye', 'اليمن', '🇾🇪'),
-('sa', 'السعودية', '🇸🇦'),
-('eg', 'مصر', '🇪🇬'),
-('dz', 'الجزائر', '🇩🇿'),
-('ma', 'المغرب', '🇲🇦'),
-('iq', 'العراق', '🇮🇶');
+");
 
+$db->exec("
 CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     phone TEXT UNIQUE,
@@ -74,6 +71,42 @@ function editMessage($chat_id, $msg_id, $text, $keyboard = null) {
     botApi('editMessageText', $params);
 }
 
+// ========== دالة التعرف على الدولة باستخدام مكتبة libphonenumber ==========
+function getCountryByPhone($phone, $db) {
+    if (!class_exists('libphonenumber\PhoneNumberUtil')) {
+        require_once __DIR__ . '/vendor/autoload.php';
+    }
+    $phoneUtil = \libphonenumber\PhoneNumberUtil::getInstance();
+    try {
+        $number = $phoneUtil->parse($phone, null);
+        $countryCode = $number->getCountryCode();
+        $region = $phoneUtil->getRegionCodeForNumber($number);
+        
+        // إنشاء العلم من الرمز المكون من حرفين
+        $flag = '';
+        if (strlen($region) == 2) {
+            $flag = mb_chr(127397 + ord($region[0])) . mb_chr(127397 + ord($region[1]));
+        } else {
+            $flag = '🏴';
+        }
+        
+        $data = [
+            'code' => (string)$countryCode,
+            'name' => $region,
+            'flag' => $flag
+        ];
+        
+        // حفظ الدولة في قاعدة البيانات إذا لم تكن موجودة
+        $stmt = $db->prepare("INSERT OR IGNORE INTO countries (code, name, flag) VALUES (?, ?, ?)");
+        $stmt->execute([$data['code'], $data['name'], $data['flag']]);
+        
+        return $data;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+// ====================================================================
+
 $update = json_decode(file_get_contents('php://input'), true);
 if (!$update) exit;
 
@@ -88,7 +121,6 @@ if ($user_id != ADMIN_ID) {
     exit;
 }
 
-// ------------------- /start مع أزرار -------------------
 if ($message && trim($message['text'] ?? '') === '/start') {
     $keyboard = [
         'inline_keyboard' => [
@@ -101,19 +133,16 @@ if ($message && trim($message['text'] ?? '') === '/start') {
     exit;
 }
 
-// ------------------- معالجة الكول باك (الأزرار) -------------------
 if ($callback) {
     botApi('answerCallbackQuery', ['callback_query_id' => $callback['id']]);
     $data = $callback['data'];
 
-    // زر تخزين حساب
     if ($data === 'store') {
         $tempFile = '/tmp/temp_' . uniqid();
         $db->prepare("INSERT INTO activation_sessions (admin_id, step, temp_file) VALUES (?, 'awaiting_phone', ?)")->execute([$user_id, $tempFile]);
         sendMessage($chat_id, "📱 أرسل رقم الهاتف مع رمز الدولة:\nمثال: +967XXXXXXXX");
         exit;
     }
-    // زر شراء حساب (عرض الدول التي بها مخزون)
     elseif ($data === 'buy') {
         $stmt = $db->query("SELECT country_code, COUNT(*) as cnt FROM accounts WHERE status='active' GROUP BY country_code");
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -122,17 +151,16 @@ if ($callback) {
         } else {
             $buttons = [];
             foreach ($rows as $row) {
-                $country = $row['country_code'];
-                $info = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
-                $info->execute([$country]);
-                $c = $info->fetch(PDO::FETCH_ASSOC);
-                $buttons[] = [['text' => "{$c['flag']} {$c['name']} ({$row['cnt']})", 'callback_data' => "buy_country_{$country}"]];
+                $stmt_c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
+                $stmt_c->execute([$row['country_code']]);
+                $c = $stmt_c->fetch(PDO::FETCH_ASSOC);
+                if (!$c) $c = ['name' => "رمز {$row['country_code']}", 'flag' => '🏴'];
+                $buttons[] = [['text' => "{$c['flag']} {$c['name']} ({$row['cnt']})", 'callback_data' => "buy_country_{$row['country_code']}"]];
             }
             sendMessage($chat_id, "اختر الدولة:", ['inline_keyboard' => $buttons]);
         }
         exit;
     }
-    // زر عرض المخزون
     elseif ($data === 'stock') {
         $stmt = $db->query("SELECT country_code, COUNT(*) as cnt FROM accounts WHERE status='active' GROUP BY country_code");
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -141,16 +169,16 @@ if ($callback) {
         } else {
             $msg = "📊 المخزون الحالي:\n";
             foreach ($rows as $row) {
-                $info = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
-                $info->execute([$row['country_code']]);
-                $c = $info->fetch(PDO::FETCH_ASSOC);
+                $stmt_c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
+                $stmt_c->execute([$row['country_code']]);
+                $c = $stmt_c->fetch(PDO::FETCH_ASSOC);
+                if (!$c) $c = ['name' => "رمز {$row['country_code']}", 'flag' => '🏴'];
                 $msg .= "{$c['flag']} {$c['name']} : {$row['cnt']} حسابات\n";
             }
             sendMessage($chat_id, $msg);
         }
         exit;
     }
-    // اختيار دولة للشراء
     elseif (preg_match('/^buy_country_(\w+)$/', $data, $match)) {
         $country_code = $match[1];
         $stmt = $db->prepare("SELECT id, phone, country_code FROM accounts WHERE country_code=? AND status='active' LIMIT 1");
@@ -161,9 +189,10 @@ if ($callback) {
             exit;
         }
         $db->prepare("INSERT OR REPLACE INTO pending_orders (account_id, buyer_id) VALUES (?, ?)")->execute([$acc['id'], $user_id]);
-        $info = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
-        $info->execute([$acc['country_code']]);
-        $c = $info->fetch(PDO::FETCH_ASSOC);
+        $stmt_c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
+        $stmt_c->execute([$acc['country_code']]);
+        $c = $stmt_c->fetch(PDO::FETCH_ASSOC);
+        if (!$c) $c = ['name' => "رمز {$acc['country_code']}", 'flag' => '🏴'];
         $msg = "📋 معلومات الحساب:\n"
              . "الدولة: {$c['flag']} {$c['name']}\n"
              . "📞 الرقم: {$acc['phone']}\n"
@@ -173,7 +202,6 @@ if ($callback) {
         sendMessage($chat_id, $msg, $keyboard);
         exit;
     }
-    // طلب الكود لحساب تم شراؤه
     elseif (preg_match('/^request_code_(\d+)$/', $data, $match)) {
         $acc_id = (int)$match[1];
         $stmt = $db->prepare("SELECT id, phone, session_file, password, country_code FROM accounts WHERE id=? AND status='active'");
@@ -183,7 +211,6 @@ if ($callback) {
             sendMessage($chat_id, "⚠️ هذا الحساب لم يعد متوفرًا.");
             exit;
         }
-        // استخدام الجلسة المخزنة لطلب كود حقيقي
         $settings = new Settings();
         $appInfo = new AppInfo();
         $appInfo->setApiId(API_ID)->setApiHash(API_HASH);
@@ -192,7 +219,6 @@ if ($callback) {
         $mad->start();
         try {
             $mad->phoneLogin($acc['phone']);
-            // انتظار الكود من رسائل الحساب
             $code = null;
             for ($i = 0; $i < 15; $i++) {
                 sleep(2);
@@ -209,12 +235,11 @@ if ($callback) {
                 exit;
             }
             $password = $acc['password'] ?? 'لا توجد كلمة مرور';
-            // إرسال الكود للمشتري
             sendMessage($chat_id, "📲 بيانات الحساب:\n📞 {$acc['phone']}\n🔑 الكود: $code\n🔐 كلمة المرور: $password");
-            // تحديث الرسالة الأصلية لعرض الكود
-            $info = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
-            $info->execute([$acc['country_code']]);
-            $c = $info->fetch(PDO::FETCH_ASSOC);
+            $stmt_c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
+            $stmt_c->execute([$acc['country_code']]);
+            $c = $stmt_c->fetch(PDO::FETCH_ASSOC);
+            if (!$c) $c = ['name' => "رمز {$acc['country_code']}", 'flag' => '🏴'];
             $newText = "📋 معلومات الحساب:\n"
                      . "الدولة: {$c['flag']} {$c['name']}\n"
                      . "📞 الرقم: {$acc['phone']}\n"
@@ -233,7 +258,6 @@ if ($callback) {
         }
         exit;
     }
-    // تسجيل الخروج وإزالة الحساب من المخزون
     elseif (preg_match('/^logout_account_(\d+)$/', $data, $match)) {
         $acc_id = (int)$match[1];
         $stmt = $db->prepare("SELECT session_file FROM accounts WHERE id=?");
@@ -259,32 +283,21 @@ if ($callback) {
     exit;
 }
 
-// ------------------- معالجة الرسائل النصية (تخزين حساب جديد) -------------------
+// معالجة الرسائل النصية (تخزين حساب جديد)
 if ($message && !$callback) {
     $text = trim($message['text'] ?? '');
     $stmt = $db->prepare("SELECT * FROM activation_sessions WHERE admin_id=? ORDER BY created_at DESC LIMIT 1");
     $stmt->execute([$user_id]);
     $session = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    // مرحلة انتظار الرقم
     if ($session && $session['step'] === 'awaiting_phone' && preg_match('/^\+\d+$/', $text)) {
         $phone = $text;
-        // استخراج رمز الدولة (أول 1-4 أرقام بعد +)
-        $country_code = null;
-        $stmt_c = $db->query("SELECT code FROM countries");
-        $countries = $stmt_c->fetchAll(PDO::FETCH_COLUMN);
-        foreach ($countries as $c) {
-            $prefix = '+' . $c;
-            if (strpos($phone, $prefix) === 0) {
-                $country_code = $c;
-                break;
-            }
-        }
-        if (!$country_code) {
+        $country = getCountryByPhone($phone, $db);
+        if (!$country) {
             sendMessage($chat_id, "❌ لم نتعرف على الدولة من هذا الرقم. تأكد من إرسال الرقم مع رمز الدول الصحيح (مثال: +967XXXXXXXX)");
             exit;
         }
-        $db->prepare("UPDATE activation_sessions SET phone=?, country_code=?, step='awaiting_code' WHERE admin_id=?")->execute([$phone, $country_code, $user_id]);
+        $db->prepare("UPDATE activation_sessions SET phone=?, country_code=?, step='awaiting_code' WHERE admin_id=?")->execute([$phone, $country['code'], $user_id]);
         $tempFile = $session['temp_file'];
         $settings = new Settings();
         $appInfo = new AppInfo();
@@ -295,7 +308,6 @@ if ($message && !$callback) {
         sendMessage($chat_id, "✅ تم إرسال كود التفعيل إلى $phone. أرسل الكود الآن:");
         exit;
     }
-    // مرحلة انتظار الكود
     elseif ($session && $session['step'] === 'awaiting_code' && is_numeric($text)) {
         $phone = $session['phone'];
         $tempFile = $session['temp_file'];
@@ -311,7 +323,6 @@ if ($message && !$callback) {
                 sendMessage($chat_id, "🔐 الحساب محمي بكلمة مرور خطوتين. أرسل كلمة المرور القديمة:");
                 exit;
             }
-            // تم الدخول بنجاح بدون كلمة مرور
             $newPassword = bin2hex(random_bytes(8));
             try {
                 $mad->update2fa(['password' => $newPassword]);
@@ -326,13 +337,16 @@ if ($message && !$callback) {
             $db->prepare("INSERT INTO accounts (phone, country_code, session_file, password, status) VALUES (?,?,?,?,'active')")
                 ->execute([$phone, $session['country_code'], $finalSession, $newPassword]);
             $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
-            sendMessage($chat_id, "🎉 تم تخزين الحساب بنجاح!\nالدولة: " . $session['country_code'] . "\nكلمة المرور الجديدة: $newPassword");
+            $stmt_c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
+            $stmt_c->execute([$session['country_code']]);
+            $c = $stmt_c->fetch(PDO::FETCH_ASSOC);
+            if (!$c) $c = ['name' => "رمز {$session['country_code']}", 'flag' => '🏴'];
+            sendMessage($chat_id, "🎉 تم تخزين الحساب بنجاح!\nالدولة: {$c['flag']} {$c['name']}\nكلمة المرور الجديدة: $newPassword");
         } catch (Exception $e) {
             sendMessage($chat_id, "❌ فشل التحقق من الكود: " . $e->getMessage());
         }
         exit;
     }
-    // مرحلة انتظار كلمة المرور القديمة
     elseif ($session && $session['step'] === 'awaiting_password') {
         $oldPass = $text;
         $phone = $session['phone'];
@@ -358,7 +372,11 @@ if ($message && !$callback) {
             $db->prepare("INSERT INTO accounts (phone, country_code, session_file, password, status) VALUES (?,?,?,?,'active')")
                 ->execute([$phone, $session['country_code'], $finalSession, $newPassword]);
             $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
-            sendMessage($chat_id, "🎉 تم تخزين الحساب بنجاح!\nالدولة: " . $session['country_code'] . "\nكلمة المرور الجديدة: $newPassword");
+            $stmt_c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
+            $stmt_c->execute([$session['country_code']]);
+            $c = $stmt_c->fetch(PDO::FETCH_ASSOC);
+            if (!$c) $c = ['name' => "رمز {$session['country_code']}", 'flag' => '🏴'];
+            sendMessage($chat_id, "🎉 تم تخزين الحساب بنجاح!\nالدولة: {$c['flag']} {$c['name']}\nكلمة المرور الجديدة: $newPassword");
         } catch (Exception $e) {
             sendMessage($chat_id, "❌ كلمة المرور خاطئة: " . $e->getMessage());
         }
