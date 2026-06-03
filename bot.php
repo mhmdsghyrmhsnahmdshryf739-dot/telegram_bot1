@@ -159,80 +159,108 @@ if ($callback) {
         }
         exit;
     }
-    elseif (preg_match('/^buy_country_(\w+)$/', $data, $match)) {
-        $country_code = $match[1];
-        $stmt = $db->prepare("SELECT id, phone FROM accounts WHERE country_code=? AND status='active' LIMIT 1");
-        $stmt->execute([$country_code]);
-        $acc = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$acc) {
-            sendMessage($chat_id, "❌ لا يوجد حسابات متاحة لهذه الدولة حاليًا.");
-            exit;
-        }
-        $db->prepare("INSERT OR REPLACE INTO pending_orders (account_id, buyer_id) VALUES (?, ?)")->execute([$acc['id'], $user_id]);
-        $stmt_c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
-        $stmt_c->execute([$country_code]);
-        $c = $stmt_c->fetch(PDO::FETCH_ASSOC);
-        $msg = "📋 معلومات الحساب:\n"
-             . "الدولة: {$c['flag']} {$c['name']}\n"
-             . "📞 الرقم: {$acc['phone']}\n"
-             . "🔑 الكود: (قيد الانتظار)\n"
-             . "🕒 الساعة: " . date('Y-m-d H:i:s');
-        $keyboard = ['inline_keyboard' => [[['text' => '📲 طلب الكود', 'callback_data' => "request_code_{$acc['id']}"]]]];
-        sendMessage($chat_id, $msg, $keyboard);
+elseif (preg_match('/^buy_country_(\w+)$/', $data, $match)) {
+    $country_code = $match[1];
+    $stmt = $db->prepare("SELECT id, phone FROM accounts WHERE country_code=? AND status='active' LIMIT 1");
+    $stmt->execute([$country_code]);
+    $acc = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$acc) {
+        sendMessage($chat_id, "❌ لا يوجد حسابات متاحة لهذه الدولة حاليًا.");
         exit;
     }
-    elseif (preg_match('/^request_code_(\d+)$/', $data, $match)) {
-        $acc_id = (int)$match[1];
-        $stmt = $db->prepare("SELECT phone, session_file, password FROM accounts WHERE id=? AND status='active'");
-        $stmt->execute([$acc_id]);
-        $acc = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$acc) { sendMessage($chat_id, "⚠️ الحساب غير متوفر."); exit; }
-        $settings = new Settings();
-        $appInfo = new AppInfo();
-        $appInfo->setApiId(API_ID)->setApiHash(API_HASH);
-        $settings->setAppInfo($appInfo);
-        $mad = new API($acc['session_file'], $settings);
-        $mad->start();
-        try {
-            $mad->phoneLogin($acc['phone']);
-            $code = null;
-            for ($i = 0; $i < 8; $i++) {
-                sleep(1);
-                $msgs = $mad->messages->getHistory(['limit' => 5]);
-                foreach ($msgs['messages'] as $m) {
-                    if (isset($m['message']) && preg_match('/\b(\d{5})\b/', $m['message'], $matchCode)) {
-                        $code = $matchCode[1];
+    $db->prepare("INSERT OR REPLACE INTO pending_orders (account_id, buyer_id) VALUES (?, ?)")->execute([$acc['id'], $user_id]);
+    $stmt_c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
+    $stmt_c->execute([$country_code]);
+    $c = $stmt_c->fetch(PDO::FETCH_ASSOC);
+    $msg = "📋 معلومات الحساب:\n"
+         . "الدولة: {$c['flag']} {$c['name']}\n"
+         . "📞 الرقم: {$acc['phone']}\n"
+         . "🔑 الكود: (قيد الانتظار)\n"
+         . "🕒 الساعة: " . date('Y-m-d H:i:s');
+    $keyboard = ['inline_keyboard' => [[['text' => '📲 طلب الكود', 'callback_data' => "request_code_{$acc['id']}"]]]];
+    sendMessage($chat_id, $msg, $keyboard);
+    exit;
+}
+elseif (preg_match('/^request_code_(\d+)$/', $data, $match)) {
+    $acc_id = (int)$match[1];
+    $stmt = $db->prepare("SELECT phone, session_file, password FROM accounts WHERE id=? AND status='active'");
+    $stmt->execute([$acc_id]);
+    $acc = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$acc) {
+        sendMessage($chat_id, "⚠️ الحساب غير متوفر.");
+        exit;
+    }
+    
+    // إعدادات MadelineProto
+    $settings = new Settings();
+    $appInfo = new AppInfo();
+    $appInfo->setApiId(API_ID)->setApiHash(API_HASH);
+    $settings->setAppInfo($appInfo);
+    
+    // تحميل الجلسة
+    $mad = new API($acc['session_file'], $settings);
+    $mad->start();
+    
+    try {
+        // طلب إرسال كود الدخول إلى رقم الحساب
+        $sentCode = $mad->phoneLogin($acc['phone']);
+        $phone_code_hash = $sentCode['phone_code_hash'];
+        
+        // انتظار الكود من خلال تحديثات البوت
+        $code = null;
+        $timeout = 20; // ثانية
+        $startTime = time();
+        
+        while (time() - $startTime < $timeout) {
+            // محاولة جلب آخر رسائل الحساب
+            $messages = $mad->messages->getHistory(['limit' => 10]);
+            if (isset($messages['messages'])) {
+                foreach ($messages['messages'] as $msg) {
+                    if (isset($msg['message']) && preg_match('/\b(\d{5,6})\b/', $msg['message'], $matches)) {
+                        $code = $matches[1];
                         break 2;
                     }
                 }
             }
-            if (!$code) { sendMessage($chat_id, "لم نستلم الكود، حاول مجددًا."); exit; }
-            $password = $acc['password'] ?? 'لا توجد';
-            sendMessage($chat_id, "📲 بيانات الحساب:\n📞 {$acc['phone']}\n🔑 الكود: $code\n🔐 كلمة المرور: $password");
-            $newText = "📋 معلومات الحساب:\n📞 {$acc['phone']}\n🔑 الكود: $code\n🔐 كلمة السر: $password\n🕒 " . date('H:i:s');
-            $keyboard = [
-                'inline_keyboard' => [
-                    [['text' => '📲 طلب الكود مرة أخرى', 'callback_data' => "request_code_{$acc_id}"]],
-                    [['text' => '🚪 تسجيل الخروج', 'callback_data' => "logout_account_{$acc_id}"]]
-                ]
-            ];
-            editMessage($chat_id, $msg_id, $newText, $keyboard);
-        } catch (Exception $e) {
-            sendMessage($chat_id, "❌ فشل طلب الكود: " . $e->getMessage());
+            sleep(1);
         }
-        exit;
+        
+        if (!$code) {
+            sendMessage($chat_id, "❌ لم يتم استلام الكود خلال 20 ثانية. تأكد من أن رقم الحساب نشط وحاول مجددًا.");
+            exit;
+        }
+        
+        $password = $acc['password'] ?? 'لا توجد كلمة مرور';
+        sendMessage($chat_id, "📲 بيانات الحساب:\n📞 {$acc['phone']}\n🔑 الكود: $code\n🔐 كلمة المرور: $password");
+        
+        // تحديث الرسالة الأصلية
+        $newText = "📋 معلومات الحساب:\n"
+                 . "📞 الرقم: {$acc['phone']}\n"
+                 . "🔑 الكود: $code\n"
+                 . "🔐 كلمة السر: $password\n"
+                 . "🕒 الساعة: " . date('Y-m-d H:i:s');
+        $keyboard = [
+            'inline_keyboard' => [
+                [['text' => '📲 طلب الكود مرة أخرى', 'callback_data' => "request_code_{$acc_id}"]],
+                [['text' => '🚪 تسجيل الخروج من الحساب', 'callback_data' => "logout_account_{$acc_id}"]]
+            ]
+        ];
+        editMessage($chat_id, $msg_id, $newText, $keyboard);
+        
+    } catch (Exception $e) {
+        sendMessage($chat_id, "❌ فشل طلب الكود: " . $e->getMessage());
     }
-    elseif (preg_match('/^logout_account_(\d+)$/', $data, $match)) {
-        $acc_id = (int)$match[1];
-        $stmt = $db->prepare("SELECT session_file FROM accounts WHERE id=?");
-        $stmt->execute([$acc_id]);
-        $file = $stmt->fetchColumn();
-        if ($file && file_exists($file)) unlink($file);
-        $db->prepare("UPDATE accounts SET status='removed' WHERE id=?")->execute([$acc_id]);
-        sendMessage($chat_id, "✅ تم تسجيل الخروج وإزالة الحساب من المخزون.");
-        editMessage($chat_id, $msg_id, "🚫 الحساب غير متوفر بعد الآن.");
-        exit;
-    }
+    exit;
+}
+elseif (preg_match('/^logout_account_(\d+)$/', $data, $match)) {
+    $acc_id = (int)$match[1];
+    $stmt = $db->prepare("SELECT session_file FROM accounts WHERE id=?");
+    $stmt->execute([$acc_id]);
+    $file = $stmt->fetchColumn();
+    if ($file && file_exists($file)) unlink($file);
+    $db->prepare("UPDATE accounts SET status='removed' WHERE id=?")->execute([$acc_id]);
+    sendMessage($chat_id, "✅ تم تسجيل الخروج وإزالة الحساب من المخزون.");
+    editMessage($chat_id, $msg_id, "🚫 الحساب غير متوفر بعد الآن.");
     exit;
 }
 
