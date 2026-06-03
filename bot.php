@@ -1,4 +1,15 @@
 <?php
+// فحص الملفات الضرورية وإرسال تقرير للمشرف
+$pharFile = __DIR__ . '/madeline-8.6.5.phar';
+$tempDir = sys_get_temp_dir();
+$pharInTemp = $tempDir . '/madeline-8.6.5.phar';
+
+$report = "📁 **تقرير الملفات**\n";
+$report .= "- madeline.php: " . (file_exists(__DIR__ . '/madeline.php') ? '✅' : '❌') . "\n";
+$report .= "- madeline-8.6.5.phar (في المجلد الحالي): " . (file_exists($pharFile) ? '✅' : '❌') . "\n";
+$report .= "- madeline-8.6.5.phar (في tmp): " . (file_exists($pharInTemp) ? '✅' : '❌') . "\n";
+$report .= "- مجلد الجلسات: " . (is_dir(SESSIONS_PATH) ? '✅' : '❌') . "\n";
+sendMessage(ADMIN_ID, $report); // أرسل التقرير لك عبر البوت
 require __DIR__ . '/madeline.php';
 require __DIR__ . '/config.php';
 
