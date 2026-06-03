@@ -17,9 +17,9 @@ CREATE TABLE IF NOT EXISTS countries (
     flag TEXT
 );
 INSERT OR IGNORE INTO countries (code, name, flag) VALUES 
-('ye', 'اليمن', '🇾🇪'),
-('sa', 'السعودية', '🇸🇦'),
-('eg', 'مصر', '🇪🇬'),
+('967', 'اليمن', '🇾🇪'),
+('+966', 'السعودية', '🇸🇦'),
+('66', 'مصر', '🇪🇬'),
 ('dz', 'الجزائر', '🇩🇿'),
 ('ma', 'المغرب', '🇲🇦'),
 ('iq', 'العراق', '🇮🇶');
