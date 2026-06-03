@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS activation_sessions (phone TEXT, admin_id INTEGER, st
 CREATE TABLE IF NOT EXISTS pending_orders (account_id INTEGER PRIMARY KEY, buyer_id INTEGER, requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
 ");
 
-// قائمة الدول الشائعة (مختصرة)
+// قائمة الدول الشائعة
 $popularCountries = [
     '967' => ['name' => 'اليمن', 'flag' => '🇾🇪'],
     '966' => ['name' => 'السعودية', 'flag' => '🇸🇦'],
@@ -54,7 +54,6 @@ function getCountryByPhone($phone, $db) {
         $stmt->execute([$code]);
         $country = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($country) return $country;
-        // إضافة رمز جديد
         $name = "رمز $code";
         $flag = '🏴';
         $stmt = $db->prepare("INSERT OR IGNORE INTO countries (code, name, flag) VALUES (?, ?, ?)");
@@ -71,8 +70,8 @@ function botApi($method, $params) {
     curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
     curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
     $result = curl_exec($ch);
     curl_close($ch);
@@ -108,7 +107,7 @@ if ($user_id != ADMIN_ID) {
 if ($message && trim($message['text'] ?? '') === '/start') {
     $keyboard = [
         'inline_keyboard' => [
-            [['text' => '📦 تخزين حسابات تلجرام', 'callback_data' => 'store']],
+            [['text' => '📦.  تخزين حسابات تلجرام', 'callback_data' => 'store']],
             [['text' => '🛒 جلب حسابات تلجرام', 'callback_data' => 'buy']],
             [['text' => '🌍 عرض الدول والمخزون', 'callback_data' => 'stock']]
         ]
@@ -259,14 +258,24 @@ if ($message && !$callback) {
         $appInfo->setApiId(API_ID)->setApiHash(API_HASH);
         $settings->setAppInfo($appInfo);
         $mad = new API($tempFile, $settings);
-        try {
-            $sentCode = $mad->phoneLogin($phone);
-            $code_hash = $sentCode['phone_code_hash'];
-            $db->prepare("UPDATE activation_sessions SET code_hash=? WHERE admin_id=?")->execute([$code_hash, $user_id]);
-            sendMessage($chat_id, "✅ تم إرسال الكود إلى $phone. أرسله الآن:");
-        } catch (Exception $e) {
-            sendMessage($chat_id, "❌ فشل إرسال الكود: " . $e->getMessage());
-            $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
+        
+        // محاولة إرسال الكود مع إعادة المحاولة تلقائياً
+        $maxRetries = 2;
+        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+            try {
+                $sentCode = $mad->phoneLogin($phone);
+                $code_hash = $sentCode['phone_code_hash'];
+                $db->prepare("UPDATE activation_sessions SET code_hash=? WHERE admin_id=?")->execute([$code_hash, $user_id]);
+                sendMessage($chat_id, "✅ تم إرسال كود التفعيل إلى $phone. أرسل الكود الآن:");
+                break;
+            } catch (Exception $e) {
+                if ($attempt < $maxRetries) {
+                    sleep(2);
+                    continue;
+                }
+                sendMessage($chat_id, "❌ فشل إرسال الكود: " . $e->getMessage());
+                $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
+            }
         }
         exit;
     }
@@ -283,7 +292,7 @@ if ($message && !$callback) {
             $authorization = $mad->completePhoneLogin($text, $code_hash);
             if ($authorization['_'] === 'account.password') {
                 $db->prepare("UPDATE activation_sessions SET step='awaiting_password' WHERE admin_id=?")->execute([$user_id]);
-                sendMessage($chat_id, "🔐 يتطلب كلمة مرور خطوتين. أرسلها:");
+                sendMessage($chat_id, "🔐 الحساب محمي بكلمة مرور خطوتين. أرسل كلمة المرور القديمة:");
                 exit;
             }
             // تم الدخول بنجاح
@@ -299,7 +308,19 @@ if ($message && !$callback) {
             $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
             sendMessage($chat_id, "🎉 تم تخزين الحساب بنجاح!\nكلمة المرور الجديدة: $newPassword");
         } catch (Exception $e) {
-            sendMessage($chat_id, "❌ فشل التحقق: " . $e->getMessage());
+            if (strpos($e->getMessage(), 'PHONE_CODE_INVALID') !== false) {
+                // إعادة إرسال الكود تلقائياً
+                try {
+                    $newSent = $mad->phoneLogin($phone);
+                    $newCodeHash = $newSent['phone_code_hash'];
+                    $db->prepare("UPDATE activation_sessions SET code_hash=? WHERE admin_id=?")->execute([$newCodeHash, $user_id]);
+                    sendMessage($chat_id, "⚠️ الكود غير صالح أو انتهت صلاحيته. تم إرسال كود جديد. أرسله خلال 60 ثانية:");
+                } catch (Exception $e2) {
+                    sendMessage($chat_id, "❌ فشل إرسال كود جديد: " . $e2->getMessage());
+                }
+            } else {
+                sendMessage($chat_id, "❌ فشل التحقق: " . $e->getMessage());
+            }
         }
         exit;
     }
