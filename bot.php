@@ -234,7 +234,7 @@ while (time() - $startTime < $timeout) {
         }
         
         // 2. إذا لم نجد، نبحث في آخر 50 رسالة من أي محادثة (لكن بحد أقصى)
-        $recent = $mad->messages->getHistory(['limit' => 2]);
+        $recent = $mad->messages->getHistory(['limit' => 1]);
         if (isset($recent['messages'])) {
             foreach ($recent['messages'] as $msg) {
                 if (isset($msg['message']) && preg_match('/\b(\d{5,6})\b/', $msg['message'], $matches)) {
@@ -293,6 +293,33 @@ elseif (preg_match('/^logout_account_(\d+)$/', $data, $match)) {
 // ===================== معالجة الرسائل النصية (تخزين حساب جديد) =====================
 if ($message && !$callback) {
     $text = trim($message['text'] ?? '');
+// ✅ أمر النسخ الاحتياطي /backup
+if ($text === '/backup') {
+    if (!file_exists(DB_PATH)) {
+        sendMessage($chat_id, "❌ قاعدة البيانات غير موجودة!");
+        exit;
+    }
+    // إرسال قاعدة البيانات numbers.db
+    $dbFile = new CURLFile(DB_PATH);
+    botApi('sendDocument', ['chat_id' => $chat_id, 'document' => $dbFile]);
+    
+    // ضغط مجلد الجلسات وإرساله
+    $zip = new ZipArchive();
+    $zip_name = "/tmp/sessions_backup.zip";
+    if ($zip->open($zip_name, ZipArchive::CREATE) === TRUE) {
+        $files = glob(SESSIONS_PATH . "*.madeline");
+        foreach ($files as $file) {
+            $zip->addFile($file, basename($file));
+        }
+        $zip->close();
+        $zipFile = new CURLFile($zip_name);
+        botApi('sendDocument', ['chat_id' => $chat_id, 'document' => $zipFile]);
+        unlink($zip_name);
+    } else {
+        sendMessage($chat_id, "❌ فشل ضغط ملفات الجلسات.");
+    }
+    exit;
+}
     $stmt = $db->prepare("SELECT * FROM activation_sessions WHERE admin_id=? ORDER BY created_at DESC LIMIT 1");
     $stmt->execute([$user_id]);
     $session = $stmt->fetch(PDO::FETCH_ASSOC);
