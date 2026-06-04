@@ -27,7 +27,7 @@ $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $db->exec("PRAGMA journal_mode=WAL");
 $db->exec("PRAGMA synchronous=NORMAL");
 
-// قائمة الدول الكاملة والموحدة (تم دمج القائمتين السابقتين)
+// قائمة الدول الكاملة والموحدة
 $masterCountriesList = [
     '967' => ['name' => 'اليمن', 'flag' => '🇾🇪'],
     '966' => ['name' => 'السعودية', 'flag' => '🇸🇦'],
@@ -59,7 +59,7 @@ $masterCountriesList = [
     '66'  => ['name' => 'تايلاند', 'flag' => '🇹🇭'],
 ];
 
-// إنشاء الجداول وإدخال الدول
+// إنشاء الجداول
 $db->exec("
 CREATE TABLE IF NOT EXISTS countries (
     code TEXT PRIMARY KEY, 
@@ -130,27 +130,21 @@ function formatDate() { return "🕒 <i>" . date('Y-m-d | h:i:s A') . "</i>"; }
  * تدعم: +967... , 967... , 00967...
  */
 function extractCountryCode($rawPhone) {
-    // 1. إزالة أي مسافات أو شرطات أو أقواس
     $cleanPhone = preg_replace('/[^\d+]/', '', $rawPhone);
     
-    // 2. التحقق من وجود علامة "+"
     if (strpos($cleanPhone, '+') === 0) {
         if (preg_match('/^\+(\d{1,4})/', $cleanPhone, $matches)) {
             return $matches[1];
         }
     }
     
-    // 3. التحقق من صيغة 00xx (معاملات دولية)
     if (preg_match('/^00(\d{1,4})/', $cleanPhone, $matches)) {
         return $matches[1];
     }
     
-    // 4. التحقق من أنها أرقام فقط (قد تكون بدون رمز دولي)
     if (preg_match('/^\d+$/', $cleanPhone)) {
-        // محاولة استخراج أطول رمز دولة تطابق من بداية الرقم
         $codes = array_keys($GLOBALS['masterCountriesList']);
-        usort($codes, function($a, $b) { return strlen($b) - strlen($a); }); // ترتيب تنازلي
-        
+        usort($codes, function($a, $b) { return strlen($b) - strlen($a); });
         foreach ($codes as $code) {
             if (strpos($cleanPhone, $code) === 0) {
                 return $code;
@@ -163,15 +157,11 @@ function extractCountryCode($rawPhone) {
 
 function getCountryByPhone($phone, $db) {
     $countryCode = extractCountryCode($phone);
-    if (!$countryCode) {
-        return null;
-    }
+    if (!$countryCode) return null;
     
     $stmt = $db->prepare("SELECT code, name, flag FROM countries WHERE code = ?");
     $stmt->execute([$countryCode]);
-    $country = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    return $country ?: null;
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 }
 
 function botApi($method, $params) {
@@ -239,17 +229,7 @@ function loadMadelineSerialized($filePath) {
     if (!$data) return null;
     return unserialize(base64_decode($data));
 }
-// للاختبار فقط - أرسل الرقم 967 إلى البوت لفحص الدول
-if ($message && trim($message['text'] ?? '') === '967') {
-    $stmt = $db->query("SELECT * FROM countries");
-    $all = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $msg = "🗺️ الدول المخزنة:\n";
-    foreach ($all as $c) {
-        $msg .= "{$c['code']} - {$c['name']} {$c['flag']}\n";
-    }
-    sendMessage($chat_id, $msg);
-    exit;
-}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 🚀 المعالجة الرئيسية
 // ═══════════════════════════════════════════════════════════════════════════
@@ -294,7 +274,8 @@ if ($message && trim($message['text'] ?? '') === '/start') {
         'inline_keyboard' => [
             [['text' => '📦 🏦 تخزين حسابات جديدة', 'callback_data' => 'store']],
             [['text' => '🛒 💰 جلب حسابات للبيع', 'callback_data' => 'buy']],
-            [['text' => '🌍 📊 عرض المخزون والإحصائيات', 'callback_data' => 'stock']]
+            [['text' => '🌍 📊 عرض المخزون والإحصائيات', 'callback_data' => 'stock']],
+            [['text' => '🌍 ⚙️ إدارة الدول', 'callback_data' => 'manage_countries']]
         ]
     ];
     sendMessage($chat_id, $welcomeMsg, $keyboard);
@@ -309,7 +290,7 @@ if ($callback) {
     botApi('answerCallbackQuery', ['callback_query_id' => $callback['id']]);
     $data = $callback['data'];
 
-    // ========== 1. زر التخزين الفخم ==========
+    // ========== 1. زر التخزين ==========
     if ($data === 'store') {
         $tempFile = SESSIONS_PATH . 'temp_' . uniqid() . '.madeline';
         $stmt = $db->prepare("INSERT INTO activation_sessions (admin_id, step, temp_file) VALUES (?, 'awaiting_phone', ?)");
@@ -327,7 +308,7 @@ if ($callback) {
         exit;
     }
     
-    // ========== 2. زر الشراء الفخم ==========
+    // ========== 2. زر الشراء ==========
     elseif ($data === 'buy') {
         $stmt = $db->query("SELECT country_code, COUNT(*) as cnt FROM accounts WHERE status='active' GROUP BY country_code");
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -360,7 +341,7 @@ if ($callback) {
         exit;
     }
     
-    // ========== 3. زر المخزون الفخم ==========
+    // ========== 3. زر المخزون ==========
     elseif ($data === 'stock') {
         $stmt = $db->query("SELECT country_code, COUNT(*) as cnt FROM accounts WHERE status='active' GROUP BY country_code");
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -392,6 +373,132 @@ if ($callback) {
             $msg = fancyMessage('📊 تقرير المخزون', $stockMsg, '📊');
             sendMessage($chat_id, $msg);
         }
+        exit;
+    }
+    
+    // ========== 4. إدارة الدول ==========
+    elseif ($data === 'manage_countries') {
+        $keyboard = [
+            'inline_keyboard' => [
+                [['text' => '📋 عرض جميع الدول', 'callback_data' => 'list_countries']],
+                [['text' => '🔄 تحديث الدول من القائمة الأساسية', 'callback_data' => 'reset_countries']],
+                [['text' => '➕ إضافة دولة جديدة', 'callback_data' => 'add_country_step1']],
+                [['text' => '🔙 رجوع', 'callback_data' => 'back_to_main']]
+            ]
+        ];
+        $msg = fancyMessage('🌍 إدارة الدول', "
+📋 <b>لوحة التحكم بالدول</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ <b>عرض الدول:</b> مشاهدة جميع الدول المخزنة
+🔄 <b>تحديث الدول:</b> إعادة تعبئة الدول من القائمة الأساسية
+➕ <b>إضافة دولة:</b> إضافة دولة جديدة يدوياً
+" . formatDate(), '🌍');
+        sendMessage($chat_id, $msg, $keyboard);
+        exit;
+    }
+    
+    // ========== عرض جميع الدول ==========
+    elseif ($data === 'list_countries') {
+        $stmt = $db->query("SELECT * FROM countries ORDER BY code");
+        $countries = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        if (empty($countries)) {
+            sendMessage($chat_id, fancyMessage('📋 قائمة الدول', "📭 لا توجد دول في قاعدة البيانات.\nاستخدم زر التحديث لإضافة الدول الأساسية.", '📋'));
+        } else {
+            $msg = "📋 <b>قائمة الدول المخزنة</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+            foreach ($countries as $c) {
+                $msg .= "{$c['flag']} <b>{$c['name']}</b> ━━━ رمز: <code>{$c['code']}</code>\n";
+            }
+            $msg .= "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📊 <b>الإجمالي:</b> " . count($countries) . " دولة\n" . formatDate();
+            sendMessage($chat_id, fancyMessage('📋 قائمة الدول', $msg, '📋'));
+        }
+        exit;
+    }
+    
+    // ========== تحديث الدول ==========
+    elseif ($data === 'reset_countries') {
+        $db->exec("DELETE FROM countries");
+        
+        $masterList = [
+            '967' => ['name' => 'اليمن', 'flag' => '🇾🇪'],
+            '966' => ['name' => 'السعودية', 'flag' => '🇸🇦'],
+            '20'  => ['name' => 'مصر', 'flag' => '🇪🇬'],
+            '213' => ['name' => 'الجزائر', 'flag' => '🇩🇿'],
+            '212' => ['name' => 'المغرب', 'flag' => '🇲🇦'],
+            '216' => ['name' => 'تونس', 'flag' => '🇹🇳'],
+            '218' => ['name' => 'ليبيا', 'flag' => '🇱🇾'],
+            '964' => ['name' => 'العراق', 'flag' => '🇮🇶'],
+            '962' => ['name' => 'الأردن', 'flag' => '🇯🇴'],
+            '961' => ['name' => 'لبنان', 'flag' => '🇱🇧'],
+            '970' => ['name' => 'فلسطين', 'flag' => '🇵🇸'],
+            '971' => ['name' => 'الإمارات', 'flag' => '🇦🇪'],
+            '968' => ['name' => 'عمان', 'flag' => '🇴🇲'],
+            '974' => ['name' => 'قطر', 'flag' => '🇶🇦'],
+            '965' => ['name' => 'الكويت', 'flag' => '🇰🇼'],
+            '1'   => ['name' => 'أمريكا/كندا', 'flag' => '🇺🇸🇨🇦'],
+            '44'  => ['name' => 'بريطانيا', 'flag' => '🇬🇧'],
+            '91'  => ['name' => 'الهند', 'flag' => '🇮🇳'],
+            '92'  => ['name' => 'باكستان', 'flag' => '🇵🇰'],
+            '90'  => ['name' => 'تركيا', 'flag' => '🇹🇷'],
+            '49'  => ['name' => 'ألمانيا', 'flag' => '🇩🇪'],
+            '33'  => ['name' => 'فرنسا', 'flag' => '🇫🇷'],
+            '34'  => ['name' => 'إسبانيا', 'flag' => '🇪🇸'],
+            '39'  => ['name' => 'إيطاليا', 'flag' => '🇮🇹'],
+            '7'   => ['name' => 'روسيا', 'flag' => '🇷🇺'],
+            '81'  => ['name' => 'اليابان', 'flag' => '🇯🇵'],
+            '86'  => ['name' => 'الصين', 'flag' => '🇨🇳'],
+            '66'  => ['name' => 'تايلاند', 'flag' => '🇹🇭'],
+        ];
+        
+        $stmt = $db->prepare("INSERT INTO countries (code, name, flag) VALUES (?, ?, ?)");
+        foreach ($masterList as $code => $info) {
+            $stmt->execute([$code, $info['name'], $info['flag']]);
+        }
+        
+        $msg = fancyMessage('🔄 تحديث الدول', "
+✅ <b>تم تحديث الدول بنجاح!</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 تم إضافة " . count($masterList) . " دولة إلى قاعدة البيانات
+" . formatDate(), '🔄');
+        sendMessage($chat_id, $msg);
+        exit;
+    }
+    
+    // ========== إضافة دولة جديدة - الخطوة 1 ==========
+    elseif ($data === 'add_country_step1') {
+        $stmt = $db->prepare("INSERT OR REPLACE INTO activation_sessions (admin_id, step, temp_file) VALUES (?, 'add_country_name', '')");
+        $stmt->execute([$user_id]);
+        
+        $msg = fancyMessage('➕ إضافة دولة جديدة', "
+📝 <b>الخطوة 1 من 3</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌍 <b>أرسل اسم الدولة</b>
+📱 مثال: <code>تايلاند</code>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ سيتم طلب رمز الدولة والعلم في الخطوات التالية
+" . formatDate(), '➕');
+        sendMessage($chat_id, $msg);
+        exit;
+    }
+    
+    // ========== الرجوع للقائمة الرئيسية ==========
+    elseif ($data === 'back_to_main') {
+        $keyboard = [
+            'inline_keyboard' => [
+                [['text' => '📦 🏦 تخزين حسابات جديدة', 'callback_data' => 'store']],
+                [['text' => '🛒 💰 جلب حسابات للبيع', 'callback_data' => 'buy']],
+                [['text' => '🌍 📊 عرض المخزون والإحصائيات', 'callback_data' => 'stock']],
+                [['text' => '🌍 ⚙️ إدارة الدول', 'callback_data' => 'manage_countries']]
+            ]
+        ];
+        $msg = fancyMessage('🏠 القائمة الرئيسية', "
+🌟 <b>" . BOT_NAME . "</b> 🌟
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<b>✨ مرحباً أيها المدير ✨</b>
+📡 <b>الإصدار:</b> " . BOT_VERSION . "
+⚙️ <b>الحالة:</b> <code>ONLINE 🟢</code>
+" . formatDate(), '🏠');
+        sendMessage($chat_id, $msg, $keyboard);
         exit;
     }
     
@@ -437,7 +544,6 @@ if ($callback) {
     elseif (preg_match('/^request_code_(\d+)$/', $data, $match)) {
         $acc_id = (int)$match[1];
         
-        // إرسال رسالة "جاري المعالجة"
         botApi('answerCallbackQuery', [
             'callback_query_id' => $callback['id'],
             'text' => '⏳ جاري طلب الكود... انتظر قليلاً ⏳',
@@ -470,7 +576,6 @@ if ($callback) {
             $mad = new API($acc['session_file'], $settings);
             $mad->start();
             
-            // طلب إرسال كود جديد
             $sentCode = $mad->phoneLogin($acc['phone']);
             
             $searchStartTime = time();
@@ -482,7 +587,6 @@ if ($callback) {
                 $lastCheckedMsgId = (int)file_get_contents($lastCheckedFile);
             }
             
-            // إرسال رسالة "جاري البحث"
             sendMessage($chat_id, "⏳ <b>جاري طلب وإرسال الكود...</b>\n📡 يرجى الانتظار لمدة تصل إلى 6 دقائق\n" . formatDate());
             
             $timeout = CODE_SEARCH_TIMEOUT;
@@ -546,7 +650,6 @@ if ($callback) {
             
             $password = $acc['password'] ?? 'لا توجد كلمة مرور';
             
-            // إرسال الكود في رسالة جديدة فخمة
             $codeMsg = fancyMessage('🎉 تم استلام الكود 🎉', "
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 " . formatPhone($acc['phone']) . "
@@ -557,7 +660,6 @@ if ($callback) {
 " . formatDate(), '🔑');
             sendMessage($chat_id, $codeMsg);
             
-            // تحديث الرسالة الأصلية
             $stmt_c = $db->prepare("SELECT country_code FROM accounts WHERE id=?");
             $stmt_c->execute([$acc_id]);
             $acc_data = $stmt_c->fetch(PDO::FETCH_ASSOC);
@@ -621,7 +723,7 @@ if ($callback) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 📝 معالجة الرسائل النصية (تخزين حساب جديد)
+// 📝 معالجة الرسائل النصية (تخزين حساب جديد + إضافة الدول)
 // ═══════════════════════════════════════════════════════════════════════════
 
 if ($message && !$callback) {
@@ -630,8 +732,96 @@ if ($message && !$callback) {
     $stmt->execute([$user_id]);
     $session = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    // مرحلة إرسال الرقم
-    if ($session && $session['step'] === 'awaiting_phone' && preg_match('/^\+\d{7,15}$/', $text)) {
+    // ========== إضافة دولة جديدة - استقبال الاسم ==========
+    if ($session && $session['step'] === 'add_country_name') {
+        $countryName = trim($text);
+        if (strlen($countryName) < 2) {
+            sendMessage($chat_id, fancyMessage('❌ خطأ', "اسم الدولة قصير جداً. أرسل اسم صحيح.", '❌'));
+            exit;
+        }
+        
+        $stmt = $db->prepare("UPDATE activation_sessions SET phone=?, step='add_country_code' WHERE admin_id=?");
+        $stmt->execute([$countryName, $user_id]);
+        
+        $msg = fancyMessage('➕ إضافة دولة جديدة', "
+📝 <b>الخطوة 2 من 3</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌍 <b>الدولة:</b> $countryName
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔢 <b>أرسل رمز الدولة</b> (أرقام فقط)
+📱 مثال: <code>66</code> لتايلاند
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ الرمز يجب أن يكون من 1 إلى 4 أرقام
+" . formatDate(), '➕');
+        sendMessage($chat_id, $msg);
+        exit;
+    }
+    
+    // ========== إضافة دولة جديدة - استقبال الرمز ==========
+    elseif ($session && $session['step'] === 'add_country_code') {
+        $countryCode = trim($text);
+        if (!preg_match('/^\d{1,4}$/', $countryCode)) {
+            sendMessage($chat_id, fancyMessage('❌ خطأ', "رمز الدولة غير صالح.\nأرسل أرقام فقط (1-4 أرقام).\nمثال: <code>66</code>", '❌'));
+            exit;
+        }
+        
+        $stmt = $db->prepare("SELECT COUNT(*) FROM countries WHERE code = ?");
+        $stmt->execute([$countryCode]);
+        if ($stmt->fetchColumn() > 0) {
+            sendMessage($chat_id, fancyMessage('❌ خطأ', "رمز الدولة $countryCode موجود بالفعل!\nاستخدم رمز آخر أو قم بتحديث الدولة الموجودة.", '❌'));
+            exit;
+        }
+        
+        $countryName = $session['phone'];
+        $stmt = $db->prepare("UPDATE activation_sessions SET country_code=?, step='add_country_flag' WHERE admin_id=?");
+        $stmt->execute([$countryCode, $user_id]);
+        
+        $msg = fancyMessage('➕ إضافة دولة جديدة', "
+📝 <b>الخطوة 3 من 3</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌍 <b>الدولة:</b> $countryName
+🔢 <b>الرمز:</b> $countryCode
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🏁 <b>أرسل علم الدولة</b> (إيموجي واحد أو أكثر)
+📱 مثال: <code>🇹🇭</code> لتايلاند
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ يمكنك نسخ العلم من الإنترنت أو لوحة الرموز
+" . formatDate(), '➕');
+        sendMessage($chat_id, $msg);
+        exit;
+    }
+    
+    // ========== إضافة دولة جديدة - استقبال العلم ==========
+    elseif ($session && $session['step'] === 'add_country_flag') {
+        $flag = trim($text);
+        if (!preg_match('/[\x{1F1E6}-\x{1F1FF}]/u', $flag)) {
+            sendMessage($chat_id, fancyMessage('❌ خطأ', "العلم غير صالح.\nأرسل إيموجي علم صحيح.\nمثال: <code>🇹🇭</code>", '❌'));
+            exit;
+        }
+        
+        $countryName = $session['phone'];
+        $countryCode = $session['country_code'];
+        
+        $stmt = $db->prepare("INSERT INTO countries (code, name, flag) VALUES (?, ?, ?)");
+        $stmt->execute([$countryCode, $countryName, $flag]);
+        
+        $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
+        
+        $msg = fancyMessage('✅ تمت الإضافة بنجاح', "
+🎉 <b>تم إضافة دولة جديدة</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🏁 <b>العلم:</b> $flag
+🌍 <b>الدولة:</b> $countryName
+🔢 <b>الرمز:</b> <code>$countryCode</code>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ يمكنك الآن تخزين حسابات بهذه الدولة
+" . formatDate(), '✅');
+        sendMessage($chat_id, $msg);
+        exit;
+    }
+    
+    // مرحلة إرسال الرقم للتخزين
+    elseif ($session && $session['step'] === 'awaiting_phone' && preg_match('/^\+\d{7,15}$/', $text)) {
         $phone = $text;
         $country = getCountryByPhone($phone, $db);
         
@@ -679,7 +869,7 @@ if ($message && !$callback) {
         exit;
     }
     
-    // مرحلة إدخال الكود
+    // مرحلة إدخال الكود للتخزين
     elseif ($session && $session['step'] === 'awaiting_code' && preg_match('/^\d{5,6}$/', $text)) {
         $phone = $session['phone'];
         $tempFile = $session['temp_file'];
