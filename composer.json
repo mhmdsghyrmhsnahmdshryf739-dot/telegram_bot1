@@ -1,0 +1,12 @@
+{
+    "name": "telegram/account-bot",
+    "description": "Telegram Account Management Bot",
+    "require": {
+        "danog/madelineproto": "^8.0"
+    },
+    "config": {
+        "allow-plugins": {
+            "php-http/discovery": true
+        }
+    }
+}
