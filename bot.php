@@ -1,6 +1,6 @@
 <?php
 // ═══════════════════════════════════════════════════════════════════════════
-// 🔥🔥🔥 بوت إدارة حسابات تيلجرام - الإصدار الفخم 2099 (المُحدّث) 🔥🔥🔥
+// 🔥🔥🔥 بوت إدارة حسابات تيلجرام - الإصدار الفخم 2099 (النهائي) 🔥🔥🔥
 // ═══════════════════════════════════════════════════════════════════════════
 
 require_once __DIR__ . '/madeline.php';
@@ -14,7 +14,7 @@ use danog\MadelineProto\Settings;
 // 📦 قاعدة البيانات والإعدادات الأولية
 // ═══════════════════════════════════════════════════════════════════════════
 
-// إنشاء المجلدات إذا لم تكن موجودة (لضمان العمل على Render)
+// إنشاء المجلدات إذا لم تكن موجودة
 $folders = [__DIR__ . '/database', SESSIONS_PATH, SERIALIZED_PATH];
 foreach ($folders as $folder) {
     if (!is_dir($folder)) {
@@ -27,7 +27,7 @@ $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $db->exec("PRAGMA journal_mode=WAL");
 $db->exec("PRAGMA synchronous=NORMAL");
 
-// قائمة الدول الكاملة والموحدة
+// قائمة الدول الكاملة
 $masterCountriesList = [
     '967' => ['name' => 'اليمن', 'flag' => '🇾🇪'],
     '966' => ['name' => 'السعودية', 'flag' => '🇸🇦'],
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS sent_codes (
 );
 ");
 
-// إعادة تعبئة جدول الدول بشكل آمن
+// إعادة تعبئة جدول الدول
 $stmt = $db->prepare("INSERT OR IGNORE INTO countries (code, name, flag) VALUES (?, ?, ?)");
 foreach ($masterCountriesList as $code => $info) {
     $stmt->execute([$code, $info['name'], $info['flag']]);
@@ -122,32 +122,41 @@ function formatPassword($pass) { return "🔐 <code>" . htmlspecialchars($pass) 
 function formatDate() { return "🕒 <i>" . date('Y-m-d | h:i:s A') . "</i>"; }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 🔧 دوال مساعدة محدثة
+// 🔧 دالة التعرف على الدولة (المطورة)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * دالة ذكية لاستخراج رمز الدولة من أي صيغة رقم
- * تدعم: +967... , 967... , 00967...
- */
-function extractCountryCode($rawPhone) {
-    $cleanPhone = preg_replace('/[^\d+]/', '', $rawPhone);
+function getCountryByPhone($phone, $db) {
+    // تنظيف الرقم من أي أحرف غير أرقام و+
+    $clean = preg_replace('/[^0-9+]/', '', $phone);
     
-    if (strpos($cleanPhone, '+') === 0) {
-        if (preg_match('/^\+(\d{1,4})/', $cleanPhone, $matches)) {
-            return $matches[1];
+    // جلب جميع الدول من قاعدة البيانات
+    $stmt = $db->query("SELECT code, name, flag FROM countries");
+    $countries = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // ترتيب الرموز من الأطول إلى الأقصر (لتجنب تداخل الرموز)
+    usort($countries, function($a, $b) {
+        return strlen($b['code']) - strlen($a['code']);
+    });
+    
+    foreach ($countries as $country) {
+        $code = $country['code'];
+        
+        // صيغة 1: +967XXXXXXXX
+        if (strpos($clean, '+' . $code) === 0) {
+            return $country;
         }
-    }
-    
-    if (preg_match('/^00(\d{1,4})/', $cleanPhone, $matches)) {
-        return $matches[1];
-    }
-    
-    if (preg_match('/^\d+$/', $cleanPhone)) {
-        $codes = array_keys($GLOBALS['masterCountriesList']);
-        usort($codes, function($a, $b) { return strlen($b) - strlen($a); });
-        foreach ($codes as $code) {
-            if (strpos($cleanPhone, $code) === 0) {
-                return $code;
+        
+        // صيغة 2: 00967XXXXXXXX
+        if (strpos($clean, '00' . $code) === 0) {
+            return $country;
+        }
+        
+        // صيغة 3: 967XXXXXXXX (بدون + أو 00)
+        if (strpos($clean, $code) === 0) {
+            // التأكد أن الرمز ليس جزءاً من رقم أطول
+            $nextChar = substr($clean, strlen($code), 1);
+            if (empty($nextChar) || !is_numeric($nextChar)) {
+                return $country;
             }
         }
     }
@@ -155,13 +164,21 @@ function extractCountryCode($rawPhone) {
     return null;
 }
 
-function getCountryByPhone($phone, $db) {
-    $countryCode = extractCountryCode($phone);
-    if (!$countryCode) return null;
+// دالة لتنسيق الرقم بشكل موحد
+function normalizePhone($phone) {
+    // إزالة أي مسافات أو شرطات
+    $clean = preg_replace('/[^0-9+]/', '', $phone);
     
-    $stmt = $db->prepare("SELECT code, name, flag FROM countries WHERE code = ?");
-    $stmt->execute([$countryCode]);
-    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    // إذا كان الرقم يبدأ بـ 00، استبدلها بـ +
+    if (strpos($clean, '00') === 0) {
+        $clean = '+' . substr($clean, 2);
+    }
+    // إذا كان الرقم أرقام فقط ولا يبدأ بـ +، أضف +
+    else if (strpos($clean, '+') !== 0 && preg_match('/^\d+$/', $clean)) {
+        $clean = '+' . $clean;
+    }
+    
+    return $clean;
 }
 
 function botApi($method, $params) {
@@ -243,6 +260,19 @@ $chat_id = $message['chat']['id'] ?? ($callback['message']['chat']['id'] ?? 0);
 $user_id = $message['from']['id'] ?? ($callback['from']['id'] ?? 0);
 $msg_id = $callback['message']['message_id'] ?? 0;
 
+// كود اختبار التعرف على الرقم - أرسل "test +967XXXXXXXX"
+if ($message && preg_match('/^test (.+)$/', trim($message['text'] ?? ''), $testMatch)) {
+    $testPhone = $testMatch[1];
+    $normalized = normalizePhone($testPhone);
+    $testCountry = getCountryByPhone($testPhone, $db);
+    if ($testCountry) {
+        sendMessage($chat_id, "✅ اختبار ناجح!\n📞 الرقم الأصلي: $testPhone\n📞 بعد التنسيق: $normalized\n🌍 الدولة: {$testCountry['flag']} {$testCountry['name']}\n🔢 الرمز: {$testCountry['code']}");
+    } else {
+        sendMessage($chat_id, "❌ فشل التعرف على الرقم: $testPhone\n📞 بعد التنسيق: $normalized\n\n💡 جرب إحدى هذه الصيغ:\n• +967XXXXXXXX\n• 00967XXXXXXXX\n• 967XXXXXXXX");
+    }
+    exit;
+}
+
 // التحقق من صلاحيات المدير
 if ($user_id != ADMIN_ID) {
     if ($message) {
@@ -256,7 +286,7 @@ if ($user_id != ADMIN_ID) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 🏠 /start - القائمة الرئيسية الفخمة
+// 🏠 /start - القائمة الرئيسية
 // ═══════════════════════════════════════════════════════════════════════════
 
 if ($message && trim($message['text'] ?? '') === '/start') {
@@ -297,12 +327,15 @@ if ($callback) {
         $stmt->execute([$user_id, $tempFile]);
         
         $msg = fancyMessage('📦 عملية التخزين', "
-📱 <b>أرسل رقم الهاتف مع رمز الدولة</b>
+📱 <b>أرسل رقم الهاتف</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📝 <b>مثال:</b> <code>+967XXXXXXXX</code>
-🌍 <b>الدول المدعومة:</b> اليمن، السعودية، مصر، وغيرها
+📝 <b>الصيغ المدعومة:</b>
+• <code>+967XXXXXXXX</code>
+• <code>00967XXXXXXXX</code>
+• <code>967XXXXXXXX</code>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⚠️ <i>تأكد من أن الرقم صحيح ومبدوء بـ +</i>
+🌍 <b>الدول المتاحة:</b> " . $db->query("SELECT COUNT(*) FROM countries")->fetchColumn() . " دولة
+⚠️ <i>سيتم التعرف على الدولة تلقائياً</i>
 " . formatDate(), '📦');
         sendMessage($chat_id, $msg);
         exit;
@@ -381,7 +414,7 @@ if ($callback) {
         $keyboard = [
             'inline_keyboard' => [
                 [['text' => '📋 عرض جميع الدول', 'callback_data' => 'list_countries']],
-                [['text' => '🔄 تحديث الدول من القائمة الأساسية', 'callback_data' => 'reset_countries']],
+                [['text'' => '🔄 تحديث الدول من القائمة الأساسية', 'callback_data' => 'reset_countries']],
                 [['text' => '➕ إضافة دولة جديدة', 'callback_data' => 'add_country_step1']],
                 [['text' => '🔙 رجوع', 'callback_data' => 'back_to_main']]
             ]
@@ -540,7 +573,7 @@ if ($callback) {
         exit;
     }
     
-    // ========== طلب الكود (البحث لمدة 6 دقائق) ==========
+    // ========== طلب الكود ==========
     elseif (preg_match('/^request_code_(\d+)$/', $data, $match)) {
         $acc_id = (int)$match[1];
         
@@ -693,7 +726,7 @@ if ($callback) {
         exit;
     }
     
-    // ========== تسجيل الخروج وإزالة الحساب ==========
+    // ========== تسجيل الخروج ==========
     elseif (preg_match('/^logout_account_(\d+)$/', $data, $match)) {
         $acc_id = (int)$match[1];
         $stmt = $db->prepare("SELECT session_file, phone FROM accounts WHERE id=?");
@@ -723,7 +756,7 @@ if ($callback) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 📝 معالجة الرسائل النصية (تخزين حساب جديد + إضافة الدول)
+// 📝 معالجة الرسائل النصية
 // ═══════════════════════════════════════════════════════════════════════════
 
 if ($message && !$callback) {
@@ -820,22 +853,34 @@ if ($message && !$callback) {
         exit;
     }
     
-    // مرحلة إرسال الرقم للتخزين
-    elseif ($session && $session['step'] === 'awaiting_phone' && preg_match('/^\+\d{7,15}$/', $text)) {
-        $phone = $text;
+    // ========== مرحلة إرسال الرقم للتخزين (المعدلة) ==========
+    elseif ($session && $session['step'] === 'awaiting_phone' && preg_match('/^[\+\d]{8,20}$/', $text)) {
+        $rawPhone = $text;
+        
+        // تنسيق الرقم بشكل موحد
+        $phone = normalizePhone($rawPhone);
+        
         $country = getCountryByPhone($phone, $db);
         
         if (!$country) {
             $msg = fancyMessage('❌ خطأ في الرقم', "
 ⚠️ <b>لم نتعرف على الدولة</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📝 تأكد من أن الرقم يبدأ بـ <code>+</code> متبوعاً برمز الدولة
-📱 مثال: <code>+967XXXXXXXX</code>
+📝 <b>الصيغ المدعومة:</b>
+• <code>+967XXXXXXXX</code>
+• <code>00967XXXXXXXX</code>
+• <code>967XXXXXXXX</code>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📱 <b>الرقم الذي أرسلته:</b> $rawPhone
+📱 <b>بعد التنسيق:</b> $phone
+🌍 <b>الدول المتاحة:</b> " . $db->query("SELECT COUNT(*) FROM countries")->fetchColumn() . " دولة
+💡 <b>تأكد من أن رمز الدولة صحيح</b>
 " . formatDate(), '❌');
             sendMessage($chat_id, $msg);
             exit;
         }
         
+        // تحديث الجلسة بالرقم والدولة
         $stmt = $db->prepare("UPDATE activation_sessions SET phone=?, country_code=?, step='awaiting_code' WHERE admin_id=?");
         $stmt->execute([$phone, $country['code'], $user_id]);
         
@@ -856,6 +901,7 @@ if ($message && !$callback) {
             $msg = fancyMessage('✅ تم إرسال الكود', "
 📱 <b>تم إرسال كود التفعيل إلى الرقم:</b>
 " . formatPhone($phone) . "
+🌍 <b>الدولة:</b> {$country['flag']} {$country['name']}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📝 <b>أرسل الكود الآن</b> (5-6 أرقام)
 " . formatDate(), '✅');
@@ -869,7 +915,7 @@ if ($message && !$callback) {
         exit;
     }
     
-    // مرحلة إدخال الكود للتخزين
+    // ========== مرحلة إدخال الكود ==========
     elseif ($session && $session['step'] === 'awaiting_code' && preg_match('/^\d{5,6}$/', $text)) {
         $phone = $session['phone'];
         $tempFile = $session['temp_file'];
@@ -952,7 +998,7 @@ if ($message && !$callback) {
         exit;
     }
     
-    // مرحلة إدخال كلمة المرور القديمة
+    // ========== مرحلة إدخال كلمة المرور القديمة ==========
     elseif ($session && $session['step'] === 'awaiting_password') {
         $oldPass = $text;
         $serializedFile = $session['serialized_file'] ?? '';
@@ -1006,6 +1052,7 @@ if ($message && !$callback) {
 📝 <b>لبدء العمل، أرسل الأمر</b> <code>/start</code>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✨ أو اتبع الخطوات المطلوبة في العملية النشطة
+💡 <b>لاختبار التعرف على الرقم أرسل:</b> <code>test +967XXXXXXXX</code>
 " . formatDate(), '⚠️');
         sendMessage($chat_id, $msg);
     }
