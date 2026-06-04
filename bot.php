@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS pending_orders (account_id INTEGER PRIMARY KEY, buyer
 CREATE TABLE IF NOT EXISTS sent_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER, code TEXT, sent_at INTEGER, UNIQUE(account_id, code));
 ");
 // قائمة الدول
-$countries = [
+$masterCountries = [
     '967' => ['اليمن', '🇾🇪'], '966' => ['السعودية', '🇸🇦'], '20' => ['مصر', '🇪🇬'],
     '213' => ['الجزائر', '🇩🇿'], '212' => ['المغرب', '🇲🇦'], '216' => ['تونس', '🇹🇳'],
     '218' => ['ليبيا', '🇱🇾'], '964' => ['العراق', '🇮🇶'], '962' => ['الأردن', '🇯🇴'],
