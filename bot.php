@@ -1,49 +1,136 @@
 <?php
-require __DIR__ . '/madeline.php';
-require __DIR__ . '/config.php';
+// ═══════════════════════════════════════════════════════════════════════════
+// 🔥🔥🔥 بوت إدارة حسابات تيلجرام - الإصدار الفخم 2099 🔥🔥🔥
+// ═══════════════════════════════════════════════════════════════════════════
+
+require_once __DIR__ . '/madeline.php';
+require_once __DIR__ . '/config.php';
 
 use danog\MadelineProto\API;
 use danog\MadelineProto\Settings\AppInfo;
 use danog\MadelineProto\Settings;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 📦 قاعدة البيانات
+// ═══════════════════════════════════════════════════════════════════════════
 $db = new PDO('sqlite:' . DB_PATH);
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$db->exec("PRAGMA journal_mode=WAL");
+$db->exec("PRAGMA synchronous=NORMAL");
 
-// التأكد من وجود عمود mad_serialized
-try {
-    $db->exec("ALTER TABLE activation_sessions ADD COLUMN mad_serialized TEXT;");
-} catch (Exception $e) {}
-
+// إنشاء الجداول
 $db->exec("
-CREATE TABLE IF NOT EXISTS countries (code TEXT PRIMARY KEY, name TEXT, flag TEXT);
-CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT UNIQUE, country_code TEXT, session_file TEXT, password TEXT, status TEXT DEFAULT 'active', stored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS activation_sessions (phone TEXT, admin_id INTEGER, step TEXT, temp_file TEXT, country_code TEXT, code_hash TEXT, mad_serialized TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS pending_orders (account_id INTEGER PRIMARY KEY, buyer_id INTEGER, requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS countries (
+    code TEXT PRIMARY KEY, 
+    name TEXT, 
+    flag TEXT
+);
+
+CREATE TABLE IF NOT EXISTS accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+    phone TEXT UNIQUE, 
+    country_code TEXT, 
+    session_file TEXT, 
+    password TEXT, 
+    status TEXT DEFAULT 'active', 
+    stored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS activation_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone TEXT, 
+    admin_id INTEGER, 
+    step TEXT, 
+    temp_file TEXT, 
+    country_code TEXT, 
+    code_hash TEXT, 
+    serialized_file TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pending_orders (
+    account_id INTEGER PRIMARY KEY, 
+    buyer_id INTEGER, 
+    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sent_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER,
+    code TEXT,
+    sent_at INTEGER,
+    UNIQUE(account_id, code)
+);
 ");
 
-// قائمة الدول الشائعة
+// ═══════════════════════════════════════════════════════════════════════════
+// 🌍 الدول المدعومة
+// ═══════════════════════════════════════════════════════════════════════════
 $popularCountries = [
-    '967' => ['name' => 'اليمن', 'flag' => '🇾🇪'],
-    '966' => ['name' => 'السعودية', 'flag' => '🇸🇦'],
-    '20'  => ['name' => 'مصر', 'flag' => '🇪🇬'],
-    '213' => ['name' => 'الجزائر', 'flag' => '🇩🇿'],
-    '212' => ['name' => 'المغرب', 'flag' => '🇲🇦'],
-    '216' => ['name' => 'تونس', 'flag' => '🇹🇳'],
-    '218' => ['name' => 'ليبيا', 'flag' => '🇱🇾'],
-    '964' => ['name' => 'العراق', 'flag' => '🇮🇶'],
-    '962' => ['name' => 'الأردن', 'flag' => '🇯🇴'],
-    '961' => ['name' => 'لبنان', 'flag' => '🇱🇧'],
-    '970' => ['name' => 'فلسطين', 'flag' => '🇵🇸'],
-    '971' => ['name' => 'الإمارات', 'flag' => '🇦🇪'],
-    '968' => ['name' => 'عمان', 'flag' => '🇴🇲'],
-    '974' => ['name' => 'قطر', 'flag' => '🇶🇦'],
-    '965' => ['name' => 'الكويت', 'flag' => '🇰🇼'],
-    '1'   => ['name' => 'الولايات المتحدة/كندا', 'flag' => '🇺🇸🇨🇦'],
+    '967' => ['name' => 'اليمن', 'flag' => '🇾🇪', 'color' => '🔴'],
+    '966' => ['name' => 'السعودية', 'flag' => '🇸🇦', 'color' => '🟢'],
+    '20'  => ['name' => 'مصر', 'flag' => '🇪🇬', 'color' => '🔴🟡'],
+    '213' => ['name' => 'الجزائر', 'flag' => '🇩🇿', 'color' => '🟢🔴'],
+    '212' => ['name' => 'المغرب', 'flag' => '🇲🇦', 'color' => '🔴🟢'],
+    '216' => ['name' => 'تونس', 'flag' => '🇹🇳', 'color' => '🔴⚪'],
+    '218' => ['name' => 'ليبيا', 'flag' => '🇱🇾', 'color' => '🟢⚫🔴'],
+    '964' => ['name' => 'العراق', 'flag' => '🇮🇶', 'color' => '🔴⚪⚫🟢'],
+    '962' => ['name' => 'الأردن', 'flag' => '🇯🇴', 'color' => '⚫⚪🟢🔴'],
+    '961' => ['name' => 'لبنان', 'flag' => '🇱🇧', 'color' => '🔴⚪🟢'],
+    '970' => ['name' => 'فلسطين', 'flag' => '🇵🇸', 'color' => '⚫⚪🟢🔴'],
+    '971' => ['name' => 'الإمارات', 'flag' => '🇦🇪', 'color' => '🟢⚪⚫🔴'],
+    '968' => ['name' => 'عمان', 'flag' => '🇴🇲', 'color' => '🔴⚪🟢'],
+    '974' => ['name' => 'قطر', 'flag' => '🇶🇦', 'color' => '🤍💜'],
+    '965' => ['name' => 'الكويت', 'flag' => '🇰🇼', 'color' => '🟢🔴⚪⚫'],
+    '1'   => ['name' => 'أمريكا/كندا', 'flag' => '🇺🇸🇨🇦', 'color' => '🔴⚪🔵'],
 ];
 
 foreach ($popularCountries as $code => $info) {
-    $db->prepare("INSERT OR IGNORE INTO countries (code, name, flag) VALUES (?, ?, ?)")->execute([$code, $info['name'], $info['flag']]);
+    $stmt = $db->prepare("INSERT OR IGNORE INTO countries (code, name, flag) VALUES (?, ?, ?)");
+    $stmt->execute([$code, $info['name'], $info['flag']]);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🎨 دوال التنسيق الفخم
+// ═══════════════════════════════════════════════════════════════════════════
+
+function fancyHeader($title, $icon = '✨') {
+    return "
+╔════════════════════════════════════════╗
+║  {$icon} <b>" . strtoupper($title) . "</b> {$icon}  ║
+╠════════════════════════════════════════╣
+";
+}
+
+function fancyFooter() {
+    return "
+╚════════════════════════════════════════╝
+⚡ <i>" . FOOTER_TEXT . "</i> ⚡";
+}
+
+function fancyMessage($title, $content, $icon = '📌') {
+    return fancyHeader($title, $icon) . $content . fancyFooter();
+}
+
+function formatPhone($phone) {
+    return "📞 <code>" . htmlspecialchars($phone) . "</code>";
+}
+
+function formatCode($code) {
+    return "🔑 <code>" . htmlspecialchars($code) . "</code>";
+}
+
+function formatPassword($pass) {
+    return "🔐 <code>" . htmlspecialchars($pass) . "</code>";
+}
+
+function formatDate() {
+    return "🕒 <i>" . date('Y-m-d | h:i:s A') . "</i>";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🔧 دوال مساعدة
+// ═══════════════════════════════════════════════════════════════════════════
 
 function getCountryByPhone($phone, $db) {
     if (preg_match('/^\+(\d{1,4})/', $phone, $matches)) {
@@ -52,10 +139,7 @@ function getCountryByPhone($phone, $db) {
         $stmt->execute([$code]);
         $country = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($country) return $country;
-        $name = "رمز $code";
-        $flag = '🏴';
-        $db->prepare("INSERT OR IGNORE INTO countries (code, name, flag) VALUES (?, ?, ?)")->execute([$code, $name, $flag]);
-        return ['code' => $code, 'name' => $name, 'flag' => $flag];
+        return null;
     }
     return null;
 }
@@ -66,26 +150,69 @@ function botApi($method, $params) {
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
     curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
     $result = curl_exec($ch);
+    $error = curl_error($ch);
     curl_close($ch);
+    if ($error) error_log("CURL Error: $error");
     return json_decode($result, true);
 }
 
 function sendMessage($chat_id, $text, $keyboard = null) {
     $params = ['chat_id' => $chat_id, 'text' => $text, 'parse_mode' => 'HTML'];
     if ($keyboard) $params['reply_markup'] = json_encode($keyboard);
-    botApi('sendMessage', $params);
+    return botApi('sendMessage', $params);
 }
 
 function editMessage($chat_id, $msg_id, $text, $keyboard = null) {
     $params = ['chat_id' => $chat_id, 'message_id' => $msg_id, 'text' => $text, 'parse_mode' => 'HTML'];
     if ($keyboard) $params['reply_markup'] = json_encode($keyboard);
-    botApi('editMessageText', $params);
+    return botApi('editMessageText', $params);
 }
+
+function logoutAccount($sessionFile, $phone, $db, $acc_id = null) {
+    try {
+        if (file_exists($sessionFile)) {
+            $settings = new Settings();
+            $appInfo = new AppInfo();
+            $appInfo->setApiId(API_ID)->setApiHash(API_HASH);
+            $settings->setAppInfo($appInfo);
+            $mad = new API($sessionFile, $settings);
+            $mad->start();
+            try { $mad->logout(); } catch (Exception $e) {}
+            unlink($sessionFile);
+        }
+        if ($acc_id) {
+            $stmt = $db->prepare("UPDATE accounts SET status='removed' WHERE id=?");
+            $stmt->execute([$acc_id]);
+        }
+        return true;
+    } catch (Exception $e) {
+        error_log("LogoutAccount error: " . $e->getMessage());
+        return false;
+    }
+}
+
+function saveMadelineSerialized($mad, $phone) {
+    $filePath = SERIALIZED_PATH . md5($phone) . '.txt';
+    $serialized = base64_encode(serialize($mad));
+    file_put_contents($filePath, $serialized);
+    return $filePath;
+}
+
+function loadMadelineSerialized($filePath) {
+    if (!file_exists($filePath)) return null;
+    $data = file_get_contents($filePath);
+    if (!$data) return null;
+    return unserialize(base64_decode($data));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚀 المعالجة الرئيسية
+// ═══════════════════════════════════════════════════════════════════════════
 
 $update = json_decode(file_get_contents('php://input'), true);
 if (!$update) exit;
@@ -96,291 +223,424 @@ $chat_id = $message['chat']['id'] ?? ($callback['message']['chat']['id'] ?? 0);
 $user_id = $message['from']['id'] ?? ($callback['from']['id'] ?? 0);
 $msg_id = $callback['message']['message_id'] ?? 0;
 
+// التحقق من صلاحيات المدير
 if ($user_id != ADMIN_ID) {
-    if ($message) sendMessage($chat_id, "⛔ غير مصرح");
+    if ($message) {
+        $errorMsg = fancyMessage('⛔ غير مصرح ⛔', 
+            "✋ <b>عذراً، أنت غير مخول لاستخدام هذا البوت!</b>\n\n" .
+            "🔒 هذا البوت مخصص للمدير فقط.\n" .
+            formatDate());
+        sendMessage($chat_id, $errorMsg);
+    }
     exit;
 }
 
-// ===================== /start =====================
+// ═══════════════════════════════════════════════════════════════════════════
+// 🏠 /start - القائمة الرئيسية الفخمة
+// ═══════════════════════════════════════════════════════════════════════════
+
 if ($message && trim($message['text'] ?? '') === '/start') {
+    $welcomeMsg = fancyHeader('مرحباً أيها المدير', '👑') . "
+🌟 <b>" . BOT_NAME . "</b> 🌟
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<b>✨ نظام إدارة حسابات تيلجرام الاحترافي ✨</b>
+📡 <b>الإصدار:</b> " . BOT_VERSION . "
+⚙️ <b>الحالة:</b> <code>ONLINE 🟢</code>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 <b>إحصائيات سريعة:</b>
+" . fancyFooter();
+
     $keyboard = [
         'inline_keyboard' => [
-            [['text' => '📦 تخزين حسابات تلجرام', 'callback_data' => 'store']],
-            [['text' => '🛒 جلب حسابات تلجرام', 'callback_data' => 'buy']],
-            [['text' => '🌍 عرض الدول والمخزون', 'callback_data' => 'stock']]
+            [['text' => '📦 🏦 تخزين حسابات جديدة', 'callback_data' => 'store']],
+            [['text' => '🛒 💰 جلب حسابات للبيع', 'callback_data' => 'buy']],
+            [['text' => '🌍 📊 عرض المخزون والإحصائيات', 'callback_data' => 'stock']]
         ]
     ];
-    sendMessage($chat_id, "مرحبًا بك في بوت إدارة حسابات تيلجرام.\nاختر إحدى الخدمات:", $keyboard);
+    sendMessage($chat_id, $welcomeMsg, $keyboard);
     exit;
 }
 
-// ===================== معالجة الأزرار =====================
+// ═══════════════════════════════════════════════════════════════════════════
+// 🎮 معالجة الأزرار
+// ═══════════════════════════════════════════════════════════════════════════
+
 if ($callback) {
     botApi('answerCallbackQuery', ['callback_query_id' => $callback['id']]);
     $data = $callback['data'];
 
+    // ========== 1. زر التخزين الفخم ==========
     if ($data === 'store') {
-        $tempFile = '/tmp/temp_' . uniqid();
-        $db->prepare("INSERT INTO activation_sessions (admin_id, step, temp_file) VALUES (?, 'awaiting_phone', ?)")->execute([$user_id, $tempFile]);
-        sendMessage($chat_id, "📱 أرسل رقم الهاتف مع رمز الدولة:\nمثال: +967XXXXXXXX");
+        $tempFile = SESSIONS_PATH . 'temp_' . uniqid() . '.madeline';
+        $stmt = $db->prepare("INSERT INTO activation_sessions (admin_id, step, temp_file) VALUES (?, 'awaiting_phone', ?)");
+        $stmt->execute([$user_id, $tempFile]);
+        
+        $msg = fancyMessage('📦 عملية التخزين', "
+📱 <b>أرسل رقم الهاتف مع رمز الدولة</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 <b>مثال:</b> <code>+967XXXXXXXX</code>
+🌍 <b>الدول المدعومة:</b> اليمن، السعودية، مصر، وغيرها
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ <i>تأكد من أن الرقم صحيح ومبدوء بـ +</i>
+" . formatDate(), '📦');
+        sendMessage($chat_id, $msg);
         exit;
     }
+    
+    // ========== 2. زر الشراء الفخم ==========
     elseif ($data === 'buy') {
         $stmt = $db->query("SELECT country_code, COUNT(*) as cnt FROM accounts WHERE status='active' GROUP BY country_code");
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
         if (!$rows) {
-            sendMessage($chat_id, "📭 لا يوجد حسابات متاحة حاليًا.");
+            $msg = fancyMessage('🛒 جلب حسابات', "
+📭 <b>لا يوجد حسابات متاحة حاليًا</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💔 عذراً، المخزون فارغ حالياً
+🔄 يرجى المحاولة لاحقاً
+" . formatDate(), '🛒');
+            sendMessage($chat_id, $msg);
         } else {
             $buttons = [];
             foreach ($rows as $row) {
                 $stmt_c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
                 $stmt_c->execute([$row['country_code']]);
                 $c = $stmt_c->fetch(PDO::FETCH_ASSOC);
-                $buttons[] = [['text' => "{$c['flag']} {$c['name']} ({$row['cnt']})", 'callback_data' => "buy_country_{$row['country_code']}"]];
+                if ($c) {
+                    $buttons[] = [['text' => "{$c['flag']} {$c['name']} ━━━ {$row['cnt']} حسابات 📦", 'callback_data' => "buy_country_{$row['country_code']}"]];
+                }
             }
-            sendMessage($chat_id, "اختر الدولة:", ['inline_keyboard' => $buttons]);
+            $msg = fancyMessage('🌍 اختيار الدولة', "
+📋 <b>اختر الدولة التي تريد شراء حساب منها</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 <b>المخزون المتاح حسب الدولة:</b>
+" . formatDate());
+            sendMessage($chat_id, $msg, ['inline_keyboard' => $buttons]);
         }
         exit;
     }
+    
+    // ========== 3. زر المخزون الفخم ==========
     elseif ($data === 'stock') {
         $stmt = $db->query("SELECT country_code, COUNT(*) as cnt FROM accounts WHERE status='active' GROUP BY country_code");
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
         if (!$rows) {
-            sendMessage($chat_id, "📭 لا يوجد حسابات في المخزون.");
+            $msg = fancyMessage('📊 المخزون', "
+📭 <b>لا يوجد حسابات في المخزون</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💔 المخزون فارغ تماماً
+" . formatDate(), '📊');
+            sendMessage($chat_id, $msg);
         } else {
-            $msg = "📊 المخزون الحالي:\n";
+            $stockMsg = "📊 <b>تقرير المخزون الحالي</b> 📊\n";
+            $stockMsg .= "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+            $total = 0;
             foreach ($rows as $row) {
                 $stmt_c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
                 $stmt_c->execute([$row['country_code']]);
                 $c = $stmt_c->fetch(PDO::FETCH_ASSOC);
-                $msg .= "{$c['flag']} {$c['name']} : {$row['cnt']} حسابات\n";
+                if ($c) {
+                    $stockMsg .= "{$c['flag']} <b>{$c['name']}</b> ━━━ <code>{$row['cnt']}</code> حسابات\n";
+                    $total += $row['cnt'];
+                }
             }
+            $stockMsg .= "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+            $stockMsg .= "📦 <b>إجمالي المخزون:</b> <code>$total</code> حساب\n";
+            $stockMsg .= formatDate();
+            
+            $msg = fancyMessage('📊 تقرير المخزون', $stockMsg, '📊');
             sendMessage($chat_id, $msg);
         }
         exit;
     }
-elseif (preg_match('/^buy_country_(\w+)$/', $data, $match)) {
-    $country_code = $match[1];
-    $stmt = $db->prepare("SELECT id, phone FROM accounts WHERE country_code=? AND status='active' LIMIT 1");
-    $stmt->execute([$country_code]);
-    $acc = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$acc) {
-        sendMessage($chat_id, "❌ لا يوجد حسابات متاحة لهذه الدولة حاليًا.");
-        exit;
-    }
-    $db->prepare("INSERT OR REPLACE INTO pending_orders (account_id, buyer_id) VALUES (?, ?)")->execute([$acc['id'], $user_id]);
-    $stmt_c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
-    $stmt_c->execute([$country_code]);
-    $c = $stmt_c->fetch(PDO::FETCH_ASSOC);
-    $msg = "📋 معلومات الحساب:\n"
-         . "الدولة: {$c['flag']} {$c['name']}\n"
-         . "📞 الرقم: {$acc['phone']}\n"
-         . "🔑 الكود: (قيد الانتظار)\n"
-         . "🕒 الساعة: " . date('Y-m-d H:i:s');
-    $keyboard = ['inline_keyboard' => [[['text' => '📲 طلب الكود', 'callback_data' => "request_code_{$acc['id']}"]]]];
-    sendMessage($chat_id, $msg, $keyboard);
-    exit;
-}
-elseif (preg_match('/^request_code_(\d+)$/', $data, $match)) {
-    $acc_id = (int)$match[1];
-    $stmt = $db->prepare("SELECT phone, session_file, password FROM accounts WHERE id=? AND status='active'");
-    $stmt->execute([$acc_id]);
-    $acc = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$acc) {
-        sendMessage($chat_id, "⚠️ الحساب غير متوفر.");
-        exit;
-    }
     
-    // ✅ فحص وجود ملف الجلسة
-    if (!file_exists($acc['session_file'])) {
-        sendMessage($chat_id, "❌ ملف الجلسة مفقود: " . basename($acc['session_file']) . "\nقد يكون الحساب تالفاً. قم بحذفه وإعادة تخزينه.");
-        // حذف الحساب من المخزون تلقائياً
-        $db->prepare("UPDATE accounts SET status='removed' WHERE id=?")->execute([$acc_id]);
-        exit;
-    }
-    
-    // إعدادات MadelineProto
-    $settings = new Settings();
-    $appInfo = new AppInfo();
-    $appInfo->setApiId(API_ID)->setApiHash(API_HASH);
-    $settings->setAppInfo($appInfo);
-    
-    // تحميل الجلسة
-    $mad = new API($acc['session_file'], $settings);
-    $mad->start();
-    
-    try {
-        // طلب إرسال كود الدخول إلى رقم الحساب
-        $sentCode = $mad->phoneLogin($acc['phone']);
- 
-        $phone_code_hash = $sentCode['phone_code_hash'];
+    // ========== اختيار دولة للشراء ==========
+    elseif (preg_match('/^buy_country_(\w+)$/', $data, $match)) {
+        $country_code = $match[1];
+        $stmt = $db->prepare("SELECT id, phone FROM accounts WHERE country_code=? AND status='active' LIMIT 1");
+        $stmt->execute([$country_code]);
+        $acc = $stmt->fetch(PDO::FETCH_ASSOC);
         
-// انتظار الكود من حساب Telegram الرسمي (id: 777000)
-$code = null;
-$timeout = 25; // ثانية
-$startTime = time();
-
-while (time() - $startTime < $timeout) {
-    try {
-        // 1. البحث في محادثة Telegram الرسمية أولاً (الأسرع)
-        $messages = $mad->messages->getHistory(['peer' => 777000, 'limit' => 5]);
-        if (isset($messages['messages'])) {
-            foreach ($messages['messages'] as $msg) {
-                if (isset($msg['message']) && preg_match('/\b(\d{5,6})\b/', $msg['message'], $matches)) {
-                    $code = $matches[1];
-                    break 2;
-                }
-            }
+        if (!$acc) {
+            $msg = fancyMessage('❌ خطأ', "
+⚠️ <b>لا يوجد حسابات متاحة لهذه الدولة حالياً</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📭 المخزون نفد من هذه الدولة
+🔄 يرجى اختيار دولة أخرى", '❌');
+            sendMessage($chat_id, $msg);
+            exit;
         }
         
-        // 2. إذا لم نجد، نبحث في آخر 50 رسالة من أي محادثة (لكن بحد أقصى)
-        $recent = $mad->messages->getHistory(['limit' => 1]);
-        if (isset($recent['messages'])) {
-            foreach ($recent['messages'] as $msg) {
-                if (isset($msg['message']) && preg_match('/\b(\d{5,6})\b/', $msg['message'], $matches)) {
-                    $code = $matches[1];
-                    break 2;
-                }
-            }
+        $stmt = $db->prepare("INSERT OR REPLACE INTO pending_orders (account_id, buyer_id) VALUES (?, ?)");
+        $stmt->execute([$acc['id'], $user_id]);
+        
+        $stmt_c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
+        $stmt_c->execute([$country_code]);
+        $c = $stmt_c->fetch(PDO::FETCH_ASSOC);
+        
+        $msg = fancyMessage('📋 معلومات الحساب', "
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🗺️ <b>الدولة:</b> {$c['flag']} {$c['name']}
+" . formatPhone($acc['phone']) . "
+🔑 <b>الكود:</b> <i>⏳ قيد الانتظار...</i>
+" . formatDate() . "
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👇 <b>اضغط الزر أدناه لطلب كود الدخول</b>", '📋');
+        
+        $keyboard = [['inline_keyboard' => [[['text' => '📲 ✨ طلب كود الدخول ✨ 📲', 'callback_data' => "request_code_{$acc['id']}"]]]]];
+        sendMessage($chat_id, $msg, $keyboard);
+        exit;
+    }
+    
+    // ========== طلب الكود (البحث لمدة 6 دقائق) ==========
+    elseif (preg_match('/^request_code_(\d+)$/', $data, $match)) {
+        $acc_id = (int)$match[1];
+        
+        // إرسال رسالة "جاري المعالجة"
+        botApi('answerCallbackQuery', [
+            'callback_query_id' => $callback['id'],
+            'text' => '⏳ جاري طلب الكود... انتظر قليلاً ⏳',
+            'show_alert' => false
+        ]);
+        
+        $stmt = $db->prepare("SELECT phone, session_file, password FROM accounts WHERE id=? AND status='active'");
+        $stmt->execute([$acc_id]);
+        $acc = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$acc) {
+            $msg = fancyMessage('⚠️ خطأ', "الحساب غير متوفر.", '⚠️');
+            sendMessage($chat_id, $msg);
+            exit;
         }
-    } catch (Exception $e) {
-        // تجاهل الأخطاء المؤقتة
+        
+        if (!file_exists($acc['session_file'])) {
+            $msg = fancyMessage('❌ خطأ', "ملف الجلسة مفقود: " . basename($acc['session_file']) . "\nسيتم حذف الحساب تلقائياً.", '❌');
+            sendMessage($chat_id, $msg);
+            logoutAccount($acc['session_file'], $acc['phone'], $db, $acc_id);
+            exit;
+        }
+        
+        $settings = new Settings();
+        $appInfo = new AppInfo();
+        $appInfo->setApiId(API_ID)->setApiHash(API_HASH);
+        $settings->setAppInfo($appInfo);
+        
+        try {
+            $mad = new API($acc['session_file'], $settings);
+            $mad->start();
+            
+            // طلب إرسال كود جديد
+            $sentCode = $mad->phoneLogin($acc['phone']);
+            
+            $searchStartTime = time();
+            $code = null;
+            $lastCheckedMsgId = 0;
+            
+            $lastCheckedFile = SERIALIZED_PATH . "last_msg_{$acc_id}.txt";
+            if (file_exists($lastCheckedFile)) {
+                $lastCheckedMsgId = (int)file_get_contents($lastCheckedFile);
+            }
+            
+            // إرسال رسالة "جاري البحث"
+            sendMessage($chat_id, "⏳ <b>جاري طلب وإرسال الكود...</b>\n📡 يرجى الانتظار لمدة تصل إلى 6 دقائق\n" . formatDate());
+            
+            $timeout = CODE_SEARCH_TIMEOUT;
+            
+            while (time() - $searchStartTime < $timeout) {
+                try {
+                    $messages = $mad->messages->getHistory([
+                        'peer' => 777000,
+                        'limit' => 20,
+                        'offset_id' => $lastCheckedMsgId
+                    ]);
+                    
+                    if (isset($messages['messages']) && !empty($messages['messages'])) {
+                        foreach ($messages['messages'] as $msg) {
+                            $msgId = $msg['id'] ?? 0;
+                            $msgDate = $msg['date'] ?? 0;
+                            
+                            if (time() - $msgDate > $timeout) continue;
+                            if ($msgId <= $lastCheckedMsgId) continue;
+                            
+                            if (isset($msg['message']) && preg_match('/\b(\d{5,6})\b/', $msg['message'], $matches)) {
+                                $potentialCode = $matches[1];
+                                
+                                $stmt_check = $db->prepare("SELECT COUNT(*) FROM sent_codes WHERE account_id=? AND code=?");
+                                $stmt_check->execute([$acc_id, $potentialCode]);
+                                $codeExists = $stmt_check->fetchColumn();
+                                
+                                if (!$codeExists) {
+                                    $code = $potentialCode;
+                                    $stmt_insert = $db->prepare("INSERT INTO sent_codes (account_id, code, sent_at) VALUES (?, ?, ?)");
+                                    $stmt_insert->execute([$acc_id, $code, time()]);
+                                    break 2;
+                                }
+                            }
+                            
+                            if ($msgId > $lastCheckedMsgId) {
+                                $lastCheckedMsgId = $msgId;
+                            }
+                        }
+                        file_put_contents($lastCheckedFile, $lastCheckedMsgId);
+                    }
+                } catch (Exception $e) {
+                    error_log("Error fetching messages: " . $e->getMessage());
+                }
+                sleep(CODE_SEARCH_INTERVAL);
+            }
+            
+            if (!$code) {
+                $msg = fancyMessage('❌ فشل استلام الكود', "
+⚠️ <b>لم يتم استلام كود جديد خلال 6 دقائق</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📞 الرقم: " . formatPhone($acc['phone']) . "
+💡 تأكد من:
+• أن رقم الحساب نشط
+• أن التطبيق مسجل بشكل صحيح
+• إعادة المحاولة لاحقاً
+" . formatDate(), '❌');
+                sendMessage($chat_id, $msg);
+                exit;
+            }
+            
+            $password = $acc['password'] ?? 'لا توجد كلمة مرور';
+            
+            // إرسال الكود في رسالة جديدة فخمة
+            $codeMsg = fancyMessage('🎉 تم استلام الكود 🎉', "
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+" . formatPhone($acc['phone']) . "
+" . formatCode($code) . "
+" . formatPassword($password) . "
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ <b>هذا الكود صالح للاستخدام لمرة واحدة فقط</b>
+" . formatDate(), '🔑');
+            sendMessage($chat_id, $codeMsg);
+            
+            // تحديث الرسالة الأصلية
+            $stmt_c = $db->prepare("SELECT country_code FROM accounts WHERE id=?");
+            $stmt_c->execute([$acc_id]);
+            $acc_data = $stmt_c->fetch(PDO::FETCH_ASSOC);
+            
+            $stmt_c2 = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
+            $stmt_c2->execute([$acc_data['country_code']]);
+            $c = $stmt_c2->fetch(PDO::FETCH_ASSOC);
+            
+            $newText = fancyMessage('✅ تم جلب الكود ✅', "
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🗺️ <b>الدولة:</b> {$c['flag']} {$c['name']}
+" . formatPhone($acc['phone']) . "
+" . formatCode($code) . "
+" . formatPassword($password) . "
+" . formatDate() . "
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👇 <b>يمكنك طلب كود جديد أو تسجيل الخروج</b>", '✅');
+            
+            $keyboard = [
+                'inline_keyboard' => [
+                    [['text' => '🔄 📲 طلب كود جديد', 'callback_data' => "request_code_{$acc_id}"]],
+                    [['text' => '🚪 🔓 تسجيل الخروج من الحساب', 'callback_data' => "logout_account_{$acc_id}"]]
+                ]
+            ];
+            editMessage($chat_id, $msg_id, $newText, $keyboard);
+            
+        } catch (Exception $e) {
+            $msg = fancyMessage('❌ خطأ في الطلب', "فشل طلب الكود: " . $e->getMessage(), '❌');
+            sendMessage($chat_id, $msg);
+        }
+        exit;
     }
-    sleep(1);
-}
-
-if (!$code) {
-    sendMessage($chat_id, "❌ لم يتم استلام الكود خلال 25 ثانية. تأكد من أن رقم الحساب نشط وحاول مجددًا.");
-    exit;
-}
+    
+    // ========== تسجيل الخروج وإزالة الحساب ==========
+    elseif (preg_match('/^logout_account_(\d+)$/', $data, $match)) {
+        $acc_id = (int)$match[1];
+        $stmt = $db->prepare("SELECT session_file, phone FROM accounts WHERE id=?");
+        $stmt->execute([$acc_id]);
+        $acc = $stmt->fetch(PDO::FETCH_ASSOC);
         
-        $password = $acc['password'] ?? 'لا توجد كلمة مرور';
-        sendMessage($chat_id, "📲 بيانات الحساب:\n📞 {$acc['phone']}\n🔑 الكود: $code\n🔐 كلمة المرور: $password");
-        
-        // تحديث الرسالة الأصلية
-        $newText = "📋 معلومات الحساب:\n"
-                 . "📞 الرقم: {$acc['phone']}\n"
-                 . "🔑 الكود: $code\n"
-                 . "🔐 كلمة السر: $password\n"
-                 . "🕒 الساعة: " . date('Y-m-d H:i:s');
-        $keyboard = [
-            'inline_keyboard' => [
-                [['text' => '📲 طلب الكود مرة أخرى', 'callback_data' => "request_code_{$acc_id}"]],
-                [['text' => '🚪 تسجيل الخروج من الحساب', 'callback_data' => "logout_account_{$acc_id}"]]
-            ]
-        ];
-        editMessage($chat_id, $msg_id, $newText, $keyboard);
-        
-    } catch (Exception $e) {
-        sendMessage($chat_id, "❌ فشل طلب الكود: " . $e->getMessage());
+        if ($acc) {
+            logoutAccount($acc['session_file'], $acc['phone'], $db, $acc_id);
+            $msg = fancyMessage('✅ تم تسجيل الخروج', "
+🔓 <b>تم تسجيل الخروج بنجاح</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📞 الرقم: " . formatPhone($acc['phone']) . "
+🗑️ تم إزالة الحساب من المخزون
+" . formatDate(), '✅');
+            sendMessage($chat_id, $msg);
+            editMessage($chat_id, $msg_id, fancyMessage('🚫 حساب غير متوفر', "
+⚠️ <b>هذا الحساب تم تسجيل الخروج منه</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ غير متوفر بعد الآن
+" . formatDate(), '🚫'));
+        } else {
+            $msg = fancyMessage('⚠️ خطأ', "الحساب غير موجود.", '⚠️');
+            sendMessage($chat_id, $msg);
+        }
+        exit;
     }
-    exit;
 }
-elseif (preg_match('/^logout_account_(\d+)$/', $data, $match)) {
-    $acc_id = (int)$match[1];
-    $stmt = $db->prepare("SELECT session_file FROM accounts WHERE id=?");
-    $stmt->execute([$acc_id]);
-    $file = $stmt->fetchColumn();
-    if ($file && file_exists($file)) unlink($file);
-    $db->prepare("UPDATE accounts SET status='removed' WHERE id=?")->execute([$acc_id]);
-    sendMessage($chat_id, "✅ تم تسجيل الخروج وإزالة الحساب من المخزون.");
-    editMessage($chat_id, $msg_id, "🚫 الحساب غير متوفر بعد الآن.");
-    exit;
-}
-} // <- هذا القوس المفقود
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 📝 معالجة الرسائل النصية (تخزين حساب جديد)
+// ═══════════════════════════════════════════════════════════════════════════
 
-// ===================== معالجة الرسائل النصية (تخزين حساب جديد) =====================
 if ($message && !$callback) {
     $text = trim($message['text'] ?? '');
-// ✅ أمر النسخ الاحتياطي الكامل /backup_all
-if ($text === '/backup_all') {
-    // اسم ملف ZIP النهائي
-    $zip_name = "/tmp/backup_full_" . date('Ymd_His') . ".zip";
-    $zip = new ZipArchive();
-    if ($zip->open($zip_name, ZipArchive::CREATE) !== TRUE) {
-        sendMessage($chat_id, "❌ فشل إنشاء ملف ZIP.");
-        exit;
-    }
-
-    // المجلد الذي نريد ضغطه (المجلد الحالي للبوت)
-    $source_dir = __DIR__; // مجلد البوت الحالي (عادة /opt/render/project/src)
-
-    // استبعاد المجلدات والملفات التي لا نحتاجها أو التي تسبب أخطاء
-    $exclude_dirs = ['/tmp', '/proc', '/sys', '/dev', '/var', '/run', '/etc', '/usr'];
-    $exclude_files = ['.env', '.gitignore', '.git/'];
-
-    // دالة لإضافة الملفات والمجلدات بشكل متكرر (recursive)
-    function addFilesToZip($dir, $zip, $exclude_dirs, $exclude_files) {
-        $files = scandir($dir);
-        foreach ($files as $file) {
-            if ($file == '.' || $file == '..') continue;
-            $path = $dir . '/' . $file;
-            // تجاهل المجلدات والمقالات المستبعدة
-            $skip = false;
-            foreach ($exclude_dirs as $ex) {
-                if (strpos($path, $ex) !== false) { $skip = true; break; }
-            }
-            foreach ($exclude_files as $exf) {
-                if (strpos($path, $exf) !== false) { $skip = true; break; }
-            }
-            if ($skip) continue;
-            if (is_dir($path)) {
-                $zip->addEmptyDir(str_replace(__DIR__ . '/', '', $path));
-                addFilesToZip($path, $zip, $exclude_dirs, $exclude_files);
-            } elseif (is_file($path)) {
-                $zip->addFile($path, str_replace(__DIR__ . '/', '', $path));
-            }
-        }
-    }
-
-    // بدء الضغط
-    addFilesToZip($source_dir, $zip, $exclude_dirs, $exclude_files);
-    $zip->close();
-
-    // إرسال الملف إلى المستخدم
-    if (file_exists($zip_name) && filesize($zip_name) > 0) {
-        $zipFile = new CURLFile($zip_name);
-        botApi('sendDocument', ['chat_id' => $chat_id, 'document' => $zipFile]);
-        sendMessage($chat_id, "✅ تم إرسال النسخة الاحتياطية الكاملة (حجم: " . round(filesize($zip_name)/1024/1024, 2) . " ميجابايت).");
-        unlink($zip_name); // حذف الملف من الخادم بعد الإرسال لتوفير المساحة
-    } else {
-        sendMessage($chat_id, "❌ فشل إنشاء ملف ZIP أو الملف فارغ.");
-    }
-    exit;
-}
     $stmt = $db->prepare("SELECT * FROM activation_sessions WHERE admin_id=? ORDER BY created_at DESC LIMIT 1");
     $stmt->execute([$user_id]);
     $session = $stmt->fetch(PDO::FETCH_ASSOC);
-
+    
     // مرحلة إرسال الرقم
-    if ($session && $session['step'] === 'awaiting_phone' && preg_match('/^\+\d+$/', $text)) {
+    if ($session && $session['step'] === 'awaiting_phone' && preg_match('/^\+\d{7,15}$/', $text)) {
         $phone = $text;
         $country = getCountryByPhone($phone, $db);
+        
         if (!$country) {
-            sendMessage($chat_id, "❌ لم نتعرف على الدولة.");
+            $msg = fancyMessage('❌ خطأ في الرقم', "
+⚠️ <b>لم نتعرف على الدولة</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 تأكد من أن الرقم يبدأ بـ <code>+</code> متبوعاً برمز الدولة
+📱 مثال: <code>+967XXXXXXXX</code>
+" . formatDate(), '❌');
+            sendMessage($chat_id, $msg);
             exit;
         }
-        $db->prepare("UPDATE activation_sessions SET phone=?, country_code=?, step='awaiting_code' WHERE admin_id=?")->execute([$phone, $country['code'], $user_id]);
+        
+        $stmt = $db->prepare("UPDATE activation_sessions SET phone=?, country_code=?, step='awaiting_code' WHERE admin_id=?");
+        $stmt->execute([$phone, $country['code'], $user_id]);
+        
         $tempFile = $session['temp_file'];
         $settings = new Settings();
         $appInfo = new AppInfo();
         $appInfo->setApiId(API_ID)->setApiHash(API_HASH);
         $settings->setAppInfo($appInfo);
-        $mad = new API($tempFile, $settings);
+        
         try {
+            $mad = new API($tempFile, $settings);
             $sentCode = $mad->phoneLogin($phone);
             $code_hash = $sentCode['phone_code_hash'];
-            $db->prepare("UPDATE activation_sessions SET code_hash=? WHERE admin_id=?")->execute([$code_hash, $user_id]);
-            sendMessage($chat_id, "✅ تم إرسال كود التفعيل إلى $phone. أرسل الكود الآن:");
+            
+            $stmt = $db->prepare("UPDATE activation_sessions SET code_hash=? WHERE admin_id=?");
+            $stmt->execute([$code_hash, $user_id]);
+            
+            $msg = fancyMessage('✅ تم إرسال الكود', "
+📱 <b>تم إرسال كود التفعيل إلى الرقم:</b>
+" . formatPhone($phone) . "
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 <b>أرسل الكود الآن</b> (5-6 أرقام)
+" . formatDate(), '✅');
+            sendMessage($chat_id, $msg);
+            
         } catch (Exception $e) {
-            sendMessage($chat_id, "❌ فشل إرسال الكود: " . $e->getMessage());
+            $msg = fancyMessage('❌ فشل الإرسال', "فشل إرسال الكود: " . $e->getMessage(), '❌');
+            sendMessage($chat_id, $msg);
             $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
         }
         exit;
     }
-    // مرحلة إدخال الكود (وتخزين الكائن المتسلسل إذا طلب كلمة مرور)
-    elseif ($session && $session['step'] === 'awaiting_code' && is_numeric($text)) {
+    
+    // مرحلة إدخال الكود
+    elseif ($session && $session['step'] === 'awaiting_code' && preg_match('/^\d{5,6}$/', $text)) {
         $phone = $session['phone'];
         $tempFile = $session['temp_file'];
         $code_hash = $session['code_hash'] ?? '';
@@ -388,90 +648,136 @@ if ($text === '/backup_all') {
         $appInfo = new AppInfo();
         $appInfo->setApiId(API_ID)->setApiHash(API_HASH);
         $settings->setAppInfo($appInfo);
-        $mad = new API($tempFile, $settings);
+        
         try {
+            $mad = new API($tempFile, $settings);
             $authorization = $mad->completePhoneLogin($text, $code_hash);
+            
             if ($authorization['_'] === 'account.password') {
-                // تسلسل الكائن MadelineProto وحفظه
-                $serialized = base64_encode(serialize($mad));
-                $db->prepare("UPDATE activation_sessions SET step='awaiting_password', mad_serialized=? WHERE admin_id=?")->execute([$serialized, $user_id]);
-                sendMessage($chat_id, "🔐 الحساب محمي بكلمة مرور خطوتين. أرسل كلمة المرور القديمة:");
+                $serializedFile = saveMadelineSerialized($mad, $phone);
+                $stmt = $db->prepare("UPDATE activation_sessions SET step='awaiting_password', serialized_file=? WHERE admin_id=?");
+                $stmt->execute([$serializedFile, $user_id]);
+                
+                $msg = fancyMessage('🔐 كلمة مرور خطوتين', "
+⚠️ <b>هذا الحساب محمي بكلمة مرور خطوتين</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 <b>أرسل كلمة المرور القديمة</b>
+" . formatDate(), '🔐');
+                sendMessage($chat_id, $msg);
                 exit;
             }
-            // تم الدخول بنجاح بدون كلمة مرور
+            
             $newPassword = bin2hex(random_bytes(8));
             try { $mad->update2fa(['password' => $newPassword]); } catch (Exception $e) {}
             try { $mad->account->cancelPasswordEmail(); } catch (Exception $e) {}
             try { $mad->account->resetAuthorization(); } catch (Exception $e) {}
-            $finalSession = '/tmp/' . md5($phone) . '.madeline';
-            if (file_exists($tempFile) && !is_dir($tempFile)) {
+            try { $mad->logout(); } catch (Exception $e) {}
+            
+            $finalSession = SESSIONS_PATH . md5($phone) . '.madeline';
+            if (file_exists($tempFile)) {
                 rename($tempFile, $finalSession);
-            } else {
-                // إذا كان الملف غير صالح، نستخدم الجلسة الحالية
-                $mad->logout();
-                $finalSession = $tempFile;
             }
-            $db->prepare("INSERT INTO accounts (phone, country_code, session_file, password, status) VALUES (?,?,?,?,'active')")
-                ->execute([$phone, $session['country_code'], $finalSession, $newPassword]);
+            
+            $stmt = $db->prepare("INSERT INTO accounts (phone, country_code, session_file, password, status) VALUES (?,?,?,?,'active')");
+            $stmt->execute([$phone, $session['country_code'], $finalSession, $newPassword]);
+            
             $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
-            sendMessage($chat_id, "🎉 تم تخزين الحساب بنجاح!\nكلمة المرور الجديدة: $newPassword");
+            
+            $successMsg = fancyMessage('🎉 تم التخزين بنجاح 🎉', "
+✅ <b>تم تخزين الحساب في قاعدة البيانات</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+" . formatPhone($phone) . "
+🔐 <b>كلمة المرور الجديدة:</b> " . formatPassword($newPassword) . "
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ <i>يرجى حفظ كلمة المرور في مكان آمن</i>
+" . formatDate(), '🎉');
+            sendMessage($chat_id, $successMsg);
+            
         } catch (Exception $e) {
             if (strpos($e->getMessage(), 'PHONE_CODE_INVALID') !== false) {
                 try {
+                    $mad = new API($tempFile, $settings);
                     $newSent = $mad->phoneLogin($phone);
                     $newCodeHash = $newSent['phone_code_hash'];
-                    $db->prepare("UPDATE activation_sessions SET code_hash=? WHERE admin_id=?")->execute([$newCodeHash, $user_id]);
-                    sendMessage($chat_id, "⚠️ الكود غير صالح أو انتهت صلاحيته. تم إرسال كود جديد. أرسله خلال 60 ثانية:");
+                    $stmt = $db->prepare("UPDATE activation_sessions SET code_hash=? WHERE admin_id=?");
+                    $stmt->execute([$newCodeHash, $user_id]);
+                    
+                    $msg = fancyMessage('⚠️ كود غير صالح', "
+⚠️ <b>الكود غير صالح أو انتهت صلاحيته</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📱 <b>تم إرسال كود جديد</b> إلى " . formatPhone($phone) . "
+📝 أرسل الكود الجديد خلال 60 ثانية
+" . formatDate(), '⚠️');
+                    sendMessage($chat_id, $msg);
+                    
                 } catch (Exception $e2) {
-                    sendMessage($chat_id, "❌ فشل إرسال كود جديد: " . $e2->getMessage());
+                    $msg = fancyMessage('❌ فشل', "فشل إرسال كود جديد: " . $e2->getMessage(), '❌');
+                    sendMessage($chat_id, $msg);
                 }
             } else {
-                sendMessage($chat_id, "❌ فشل التحقق: " . $e->getMessage());
+                $msg = fancyMessage('❌ فشل التحقق', "فشل التحقق من الكود: " . $e->getMessage(), '❌');
+                sendMessage($chat_id, $msg);
             }
         }
         exit;
     }
-    // مرحلة إدخال كلمة المرور القديمة (استعادة الكائن المتسلسل)
+    
+    // مرحلة إدخال كلمة المرور القديمة
     elseif ($session && $session['step'] === 'awaiting_password') {
         $oldPass = $text;
-        $tempFile = $session['temp_file'];
-        $serialized = base64_decode($session['mad_serialized'] ?? '');
-        if (!$serialized) {
-            sendMessage($chat_id, "❌ خطأ في الجلسة، ابدأ من جديد.");
-            $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
-            exit;
-        }
-        /** @var API $mad */
-        $mad = unserialize($serialized);
+        $serializedFile = $session['serialized_file'] ?? '';
+        $mad = loadMadelineSerialized($serializedFile);
+        
         if (!$mad) {
-            sendMessage($chat_id, "❌ لا يمكن استعادة الجلسة، أعد المحاولة.");
+            $msg = fancyMessage('❌ خطأ في الجلسة', "خطأ في الجلسة، ابدأ من جديد.", '❌');
+            sendMessage($chat_id, $msg);
             $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
             exit;
         }
+        
         try {
             $authorization = $mad->complete2faLogin($oldPass);
             $newPassword = bin2hex(random_bytes(8));
+            
             try { $mad->update2fa(['password' => $newPassword]); } catch (Exception $e) {}
             try { $mad->account->cancelPasswordEmail(); } catch (Exception $e) {}
             try { $mad->account->resetAuthorization(); } catch (Exception $e) {}
-            $finalSession = '/tmp/' . md5($session['phone']) . '.madeline';
-            if (file_exists($tempFile) && !is_dir($tempFile)) {
+            try { $mad->logout(); } catch (Exception $e) {}
+            
+            $finalSession = SESSIONS_PATH . md5($session['phone']) . '.madeline';
+            $tempFile = $session['temp_file'];
+            if (file_exists($tempFile)) {
                 rename($tempFile, $finalSession);
-            } else {
-                $mad->logout();
-                $finalSession = $tempFile;
             }
-            $db->prepare("INSERT INTO accounts (phone, country_code, session_file, password, status) VALUES (?,?,?,?,'active')")
-                ->execute([$session['phone'], $session['country_code'], $finalSession, $newPassword]);
+            
+            $stmt = $db->prepare("INSERT INTO accounts (phone, country_code, session_file, password, status) VALUES (?,?,?,?,'active')");
+            $stmt->execute([$session['phone'], $session['country_code'], $finalSession, $newPassword]);
+            
             $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
-            sendMessage($chat_id, "🎉 تم تخزين الحساب بنجاح!\nكلمة المرور الجديدة: $newPassword");
+            
+            $successMsg = fancyMessage('🎉 تم التخزين بنجاح 🎉', "
+✅ <b>تم تخزين الحساب في قاعدة البيانات</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+" . formatPhone($session['phone']) . "
+🔐 <b>كلمة المرور الجديدة:</b> " . formatPassword($newPassword) . "
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ <i>يرجى حفظ كلمة المرور في مكان آمن</i>
+" . formatDate(), '🎉');
+            sendMessage($chat_id, $successMsg);
+            
         } catch (Exception $e) {
-            sendMessage($chat_id, "❌ كلمة المرور خاطئة: " . $e->getMessage());
+            $msg = fancyMessage('❌ كلمة مرور خاطئة', "كلمة المرور غير صحيحة: " . $e->getMessage(), '❌');
+            sendMessage($chat_id, $msg);
         }
         exit;
     }
     else {
-        sendMessage($chat_id, "⚠️ أرسل /start للبدء");
+        $msg = fancyMessage('⚠️ تنبيه', "
+📝 <b>لبدء العمل، أرسل الأمر</b> <code>/start</code>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ أو اتبع الخطوات المطلوبة في العملية النشطة
+" . formatDate(), '⚠️');
+        sendMessage($chat_id, $msg);
     }
 }
 ?>
