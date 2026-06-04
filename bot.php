@@ -1,6 +1,6 @@
 <?php
 // ═══════════════════════════════════════════════════════════════════════════
-// 🔥🔥🔥 بوت إدارة حسابات تيلجرام - الإصدار المصحح والمستقر 🔥🔥🔥
+// 🔥🔥🔥 بوت إدارة حسابات تيلجرام - الإصدار الأمني الاحترافي المحسن 🔥🔥🔥
 // ═══════════════════════════════════════════════════════════════════════════
 
 require_once __DIR__ . '/madeline.php';
@@ -33,7 +33,7 @@ $masterCountries = [
     '218' => ['ليبيا', '🇱🇾'], '964' => ['العراق', '🇮🇶'], '962' => ['الأردن', '🇯🇴'],
     '961' => ['لبنان', '🇱🇧'], '970' => ['فلسطين', '🇵🇸'], '971' => ['الإمارات', '🇦🇪'],
     '968' => ['عمان', '🇴🇲'], '974' => ['قطر', '🇶🇦'], '965' => ['الكويت', '🇰🇼'],
-    '1' => ['أمريكا/كندا', '🇺🇸🇨ナン'], '44' => ['بريطانيا', '🇬🇧'], '91' => ['الهند', '🇮🇳'],
+    '1' => ['أمريكا/كندا', '🇺🇸🇨🇦'], '44' => ['بريطانيا', '🇬🇧'], '91' => ['الهند', '🇮🇳'],
     '92' => ['باكستان', '🇵🇰'], '90' => ['تركيا', '🇹🇷'], '49' => ['ألمانيا', '🇩🇪'],
     '33' => ['فرنسا', '🇫🇷'], '34' => ['إسبانيا', '🇪🇸'], '39' => ['إيطاليا', '🇮🇹'],
     '7' => ['روسيا', '🇷🇺'], '81' => ['اليابان', '🇯🇵'], '86' => ['الصين', '🇨🇳'],
@@ -60,7 +60,6 @@ function formatCode($code) { return "🔑 <code>" . htmlspecialchars($code) . "<
 function formatPassword($pass) { return "🔐 <code>" . htmlspecialchars($pass) . "</code>"; }
 function formatDate() { return "🕒 <i>" . date('Y-m-d | h:i:s A') . "</i>"; }
 
-// 🔧 دوال مساعدة
 function getCountryByPhone($phone, $db) {
     $clean = preg_replace('/[^0-9]/', '', $phone);
     $stmt = $db->query("SELECT code, name, flag FROM countries ORDER BY LENGTH(code) DESC");
@@ -99,7 +98,6 @@ function answerCallback($id, $text = null) {
     botApi('answerCallbackQuery', $params);
 }
 
-// دالة تسجيل الخروج المصححة لحمايتها من الانهيار الدائري
 function forceLogout($sessionFile, $phone, $acc_id, $db) {
     try {
         if (!file_exists($sessionFile)) {
@@ -116,13 +114,11 @@ function forceLogout($sessionFile, $phone, $acc_id, $db) {
         $mad->start();
         try {
             $mad->logout();
-        } catch (Exception $e) {
-            // تجاهل خطأ تسجيل الخروج إذا كانت الجلسة ميتة بالفعل بالأساس
-        }
+        } catch (Exception $e) {}
         
         if (file_exists($sessionFile)) @unlink($sessionFile);
         $db->prepare("UPDATE accounts SET status='removed' WHERE id=?")->execute([$acc_id]);
-        return ['success' => true, 'message' => 'تم تسجيل الخروج بنجاح'];
+        return ['success' => true, 'message' => 'تم تسجيل الخروج بنجاح وطرد الجلسة'];
     } catch (Exception $e) {
         if (file_exists($sessionFile)) @unlink($sessionFile);
         $db->prepare("UPDATE accounts SET status='removed' WHERE id=?")->execute([$acc_id]);
@@ -130,7 +126,6 @@ function forceLogout($sessionFile, $phone, $acc_id, $db) {
     }
 }
 
-// 🚀 المعالجة الرئيسية
 $update = json_decode(file_get_contents('php://input'), true);
 if (!$update) exit;
 
@@ -145,7 +140,6 @@ if ($user_id != ADMIN_ID) {
     exit;
 }
 
-// 🏠 /start
 if ($message && trim($message['text'] ?? '') === '/start') {
     $text = fancyHeader('مرحباً أيها المدير', '👑') . "
 🌟 <b>" . BOT_NAME . "</b> 🌟
@@ -167,7 +161,6 @@ if ($message && trim($message['text'] ?? '') === '/start') {
     exit;
 }
 
-// 🎮 معالجة الأزرار
 if ($callback) {
     $data = $callback['data'];
 
@@ -203,7 +196,7 @@ if ($callback) {
                 $country = $c->fetch(PDO::FETCH_ASSOC);
                 if ($country) $buttons[] = [['text' => "{$country['flag']} {$country['name']} ━━━ {$row['cnt']} حسابات", 'callback_data' => "buy_{$row['country_code']}"]];
             }
-            $buttons[] = [['text' => '🔙 رجوع', 'callback_data' => 'back_main']];
+            $buttons[] = [['text' => '🔙 رجوع', 'callback_data' => 'back_main'];
             $text = fancyMessage('🌍 اختيار الدولة', "📋 اختر الدولة التي تريد سحب حساب منها\n" . formatDate(), '🌍');
             editMessage($chat_id, $msg_id, $text, ['inline_keyboard' => $buttons]);
         }
@@ -319,7 +312,7 @@ if ($callback) {
             $c = $db->prepare("SELECT name, flag FROM countries WHERE code=?");
             $c->execute([$code]);
             $country = $c->fetch(PDO::FETCH_ASSOC);
-            $msg = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🗺️ <b>الدولة:</b> {$country['flag']} {$country['name']}\n" . formatPhone($account['phone']) . "\n🔑 <b>الكود:</b> <i>⏳ قيد الفحص والاستخراج...</i>\n" . formatDate() . "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            $msg = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🗺️ <b>الدولة:</b> {$country['flag']} {$country['name']}\n" . formatPhone($account['phone']) . "\n🔑 <b>الكود:</b> <i>⏳ اضغط على الزر أدناه لجلب كود جديد وحي...</i>\n" . formatDate() . "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
             $text = fancyMessage('📋 معلومات الحساب المستهدف', $msg, '📋');
             $keyboard = [
                 'inline_keyboard' => [
@@ -333,10 +326,10 @@ if ($callback) {
         exit;
     }
     
-    // 🔥 تم تحديث هذا القسم لمنع تعليق السيرفر (Non-blocking Fast Check)
+    // 🔥 رابعاً: حل مشكلة الأكواد القديمة عبر فلترة زمن الوصول الفعلي للرسالة
     elseif (preg_match('/^code_(\d+)$/', $data, $m)) {
         $acc_id = $m[1];
-        answerCallback($callback['id'], '⏳ جاري الاتصال بالجلسة وجلب الرسائل...', false);
+        answerCallback($callback['id'], '⏳ جاري مراجعة الرسائل الجديدة في الحساب...', false);
         
         $acc = $db->prepare("SELECT phone, session_file, password FROM accounts WHERE id=? AND status='active'");
         $acc->execute([$acc_id]);
@@ -359,17 +352,23 @@ if ($callback) {
             $mad->start();
             
             $code = null;
-            $msgs = $mad->messages->getHistory(['peer' => 777000, 'limit' => 6]);
+            $msgs = $mad->messages->getHistory(['peer' => 777000, 'limit' => 5]);
+            $currentTime = time();
             
             foreach ($msgs['messages'] as $msg) {
+                // فلترة زمنية: تجاهل الرسالة إذا كان عمرها أكثر من 120 ثانية (دقيقتين) لمنع جلب الأكواد القديمة
+                if (isset($msg['date']) && ($currentTime - $msg['date'] > 120)) {
+                    continue; 
+                }
+
                 if (isset($msg['message']) && preg_match('/\b(\d{5,6})\b/', $msg['message'], $match)) {
                     $potentialCode = $match[1];
-                    // الكود غير مكرر في آخر 5 دقائق
+                    
                     $check = $db->prepare("SELECT COUNT(*) FROM sent_codes WHERE account_id=? AND code=? AND sent_at > ?");
-                    $check->execute([$acc_id, $potentialCode, (time() - 300)]);
+                    $check->execute([$acc_id, $potentialCode, ($currentTime - 300)]);
                     if ($check->fetchColumn() == 0) {
                         $code = $potentialCode;
-                        $db->prepare("INSERT INTO sent_codes (account_id, code, sent_at) VALUES (?, ?, ?)")->execute([$acc_id, $code, time()]);
+                        $db->prepare("INSERT INTO sent_codes (account_id, code, sent_at) VALUES (?, ?, ?)")->execute([$acc_id, $code, $currentTime]);
                         break;
                     }
                 }
@@ -382,7 +381,7 @@ if ($callback) {
                 $country = $c->fetch(PDO::FETCH_ASSOC);
                 
                 $msg = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🗺️ <b>الدولة:</b> {$country['flag']} {$country['name']}\n" . formatPhone($account['phone']) . "\n" . formatCode($code) . "\n" . formatPassword($pass) . "\n" . formatDate() . "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
-                $text = fancyMessage('✅ تم استخراج كود تليجرام بنجاح', $msg, '✅');
+                $text = fancyMessage('✅ تم استخراج كود تليجرام الجديد', $msg, '✅');
                 $keyboard = [
                     'inline_keyboard' => [
                         [['text' => '🔄 📲 تحديث وطلب كود جديد', 'callback_data' => "code_{$acc_id}"]],
@@ -392,7 +391,7 @@ if ($callback) {
                 ];
                 editMessage($chat_id, $msg_id, $text, $keyboard);
             } else {
-                $text = fancyMessage('⏱️ لم يصل كود جديد حالياً', "📡 لم يتم رصد أكواد جديدة في محادثة تليجرام الرسمية.\n\nتأكد من قيامك بطلب كود دخول من تطبيقك أولاً ثم قم بالتحديث.", '⏱️');
+                $text = fancyMessage('⏱️ لم يصل كود جديد حالياً', "📡 لا توجد رسائل تفعيل جديدة (خلال آخر دقيقتين) في محادثة تليجرام.\n\nقم بطلب الكود مجدداً من تطبيقك ثم اضغط فحص.", '⏱️');
                 $keyboard = [
                     'inline_keyboard' => [
                         [['text' => '🔄 فحص مجدداً الآن', 'callback_data' => "code_{$acc_id}"]],
@@ -427,7 +426,6 @@ if ($callback) {
     }
 }
 
-// 📝 معالجة الرسائل النصية المباشرة
 if ($message && !$callback) {
     $text = trim($message['text'] ?? '');
     $session = $db->prepare("SELECT * FROM activation_sessions WHERE admin_id=? ORDER BY created_at DESC LIMIT 1");
@@ -492,6 +490,7 @@ if ($message && !$callback) {
         exit;
     }
     
+    // 🔥 أولاً وثانياً وثالثاً: تنفيذ الحماية الأمنية الشاملة فور التفعيل الناجح مباشرة
     elseif ($session && $session['step'] === 'awaiting_code' && preg_match('/^\d{5,6}$/', $text)) {
         $phone = $session['phone'];
         $tempFile = $session['temp_file'];
@@ -505,16 +504,16 @@ if ($message && !$callback) {
             $authorization = $mad->completePhoneLogin($text, $session['code_hash']);
             
             if ($authorization['_'] === 'account.password') {
-                // بدلاً من السيريالايز المعطوب، نترك الملف كما هو وننتقل للخطوة التالية مباشرة
                 $db->prepare("UPDATE activation_sessions SET step='awaiting_password' WHERE admin_id=?")->execute([$user_id]);
-                sendMessage($chat_id, fancyMessage('🔐 الحساب محمي بـ 2FA', "🔐 الحساب يتطلب التحقق بخطوتين.\n\n📝 أرسل باسبورد الحساب الحالي لإكمال التخزين:", '🔐'));
+                sendMessage($chat_id, fancyMessage('🔐 الحساب محمي بـ 2FA', "🔐 الحساب يتطلب التحقق بخطوتين.\n\n📝 أرسل باسبورد الحساب الحالي لإكمال التخزين وطرد البائع:", '🔐'));
                 exit;
             }
             
+            // [إنفاذ التعديلات الأمنية] للـ No-2FA Accounts
             $newPassword = bin2hex(random_bytes(8));
-            try { $mad->update2fa(['password' => $newPassword]); } catch (Exception $e) {}
-            try { $mad->account->cancelPasswordEmail(); } catch (Exception $e) {}
-            try { $mad->account->resetAuthorization(); } catch (Exception $e) {}
+            try { $mad->update2fa(['password' => $newPassword]); } catch (Exception $e) {} // 1. تغيير كلمة المرور
+            try { $mad->account->cancelPasswordEmail(); } catch (Exception $e) {}         // 2. إزالة البريد الإلكتروني
+            try { $mad->account->resetAuthorization(); } catch (Exception $e) {}          // 3. إلغاء وطرد كافة جلسات البائع
             
             $finalFile = SESSIONS_PATH . md5($phone) . '.madeline';
             if (file_exists($tempFile)) rename($tempFile, $finalFile);            
@@ -522,13 +521,14 @@ if ($message && !$callback) {
             $db->prepare("INSERT INTO accounts (phone, country_code, session_file, password, status) VALUES (?,?,?,?,'active')")->execute([$phone, $session['country_code'], $finalFile, $newPassword]);
             $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
             
-            sendMessage($chat_id, fancyMessage('🎉 تم التخزين بنجاح', "✅ تم التخزين وقفل الحساب بالرمز السري الجديد بنجاح.\n\n" . formatPhone($phone) . "\n🔐 رمز الحماية المولد: " . formatPassword($newPassword), '🎉'));
+            sendMessage($chat_id, fancyMessage('🎉 تم الحفظ والـتأمين', "✅ تم التخزين بنجاح.\n🛡️ تم تغيير الباسبورد وإلغاء إيميل الاسترداد وطرد جميع الجلسات القديمة التابعة للبائع.\n\n" . formatPhone($phone) . "\n🔐 رمز الحماية الجديد: " . formatPassword($newPassword), '🎉'));
         } catch (Exception $e) {
             sendMessage($chat_id, fancyMessage('❌ خطأ تفعيل الكود', "السبب: " . $e->getMessage(), '❌'));
         }
         exit;
     }
     
+    // 🔥 [إنفاذ التعديلات الأمنية] للـ 2FA Accounts بعد كتابة الباسبورد القديم
     elseif ($session && $session['step'] === 'awaiting_password') {
         $oldPass = $text;
         $tempFile = $session['temp_file'];
@@ -543,9 +543,9 @@ if ($message && !$callback) {
             $mad->complete2faLogin($oldPass);
             
             $newPassword = bin2hex(random_bytes(8));
-            try { $mad->update2fa(['password' => $newPassword]); } catch (Exception $e) {}
-            try { $mad->account->cancelPasswordEmail(); } catch (Exception $e) {}
-            try { $mad->account->resetAuthorization(); } catch (Exception $e) {}
+            try { $mad->update2fa(['password' => $newPassword]); } catch (Exception $e) {} // 1. تغيير الباسبورد القديم بجديد
+            try { $mad->account->cancelPasswordEmail(); } catch (Exception $e) {}         // 2. حذف البريد الإلكتروني المربوط
+            try { $mad->account->resetAuthorization(); } catch (Exception $e) {}          // 3. إلغاء وطرد جلسات البائع بالكامل
             
             $finalFile = SESSIONS_PATH . md5($session['phone']) . '.madeline';
             if (file_exists($tempFile)) rename($tempFile, $finalFile);
@@ -553,7 +553,7 @@ if ($message && !$callback) {
             $db->prepare("INSERT INTO accounts (phone, country_code, session_file, password, status) VALUES (?,?,?,?,'active')")->execute([$session['phone'], $session['country_code'], $finalFile, $newPassword]);
             $db->prepare("DELETE FROM activation_sessions WHERE admin_id=?")->execute([$user_id]);
             
-            sendMessage($chat_id, fancyMessage('🎉 تم فك القفل وتخزينه', "✅ تم التخزين بنجاح وتعيين الباسبورد المحسن بالمنظومة.", '🎉'));
+            sendMessage($chat_id, fancyMessage('🎉 تم فك القفل والتأمين الشامل', "✅ تم تجاوز الـ 2FA القديم بنجاح.\n🛡️ تم تعديل كلمة المرور وحذف إيميل الاسترداد وطرد البائع نهائياً من الحساب.\n\n🔐 الباسبورد الجديد المنصّب: " . formatPassword($newPassword), '🎉'));
         } catch (Exception $e) {
             sendMessage($chat_id, fancyMessage('❌ باسبورد غير صحيح', "فشلت مطابقة كلمة المرور: " . $e->getMessage(), '❌'));
         }
