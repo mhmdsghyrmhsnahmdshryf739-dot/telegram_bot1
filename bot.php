@@ -1,6 +1,6 @@
 <?php
 // ═══════════════════════════════════════════════════════════════════════════
-// 🔥🔥🔥 بوت إدارة حسابات تيلجرام - الإصدار الفخم 2099 🔥🔥🔥
+// 🔥🔥🔥 بوت إدارة حسابات تيلجرام - الإصدار الفخم 2099 (المُحدّث) 🔥🔥🔥
 // ═══════════════════════════════════════════════════════════════════════════
 
 require_once __DIR__ . '/madeline.php';
@@ -11,14 +11,55 @@ use danog\MadelineProto\Settings\AppInfo;
 use danog\MadelineProto\Settings;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 📦 قاعدة البيانات
+// 📦 قاعدة البيانات والإعدادات الأولية
 // ═══════════════════════════════════════════════════════════════════════════
+
+// إنشاء المجلدات إذا لم تكن موجودة (لضمان العمل على Render)
+$folders = [__DIR__ . '/database', SESSIONS_PATH, SERIALIZED_PATH];
+foreach ($folders as $folder) {
+    if (!is_dir($folder)) {
+        mkdir($folder, 0777, true);
+    }
+}
+
 $db = new PDO('sqlite:' . DB_PATH);
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $db->exec("PRAGMA journal_mode=WAL");
 $db->exec("PRAGMA synchronous=NORMAL");
 
-// إنشاء الجداول
+// قائمة الدول الكاملة والموحدة (تم دمج القائمتين السابقتين)
+$masterCountriesList = [
+    '967' => ['name' => 'اليمن', 'flag' => '🇾🇪'],
+    '966' => ['name' => 'السعودية', 'flag' => '🇸🇦'],
+    '20'  => ['name' => 'مصر', 'flag' => '🇪🇬'],
+    '213' => ['name' => 'الجزائر', 'flag' => '🇩🇿'],
+    '212' => ['name' => 'المغرب', 'flag' => '🇲🇦'],
+    '216' => ['name' => 'تونس', 'flag' => '🇹🇳'],
+    '218' => ['name' => 'ليبيا', 'flag' => '🇱🇾'],
+    '964' => ['name' => 'العراق', 'flag' => '🇮🇶'],
+    '962' => ['name' => 'الأردن', 'flag' => '🇯🇴'],
+    '961' => ['name' => 'لبنان', 'flag' => '🇱🇧'],
+    '970' => ['name' => 'فلسطين', 'flag' => '🇵🇸'],
+    '971' => ['name' => 'الإمارات', 'flag' => '🇦🇪'],
+    '968' => ['name' => 'عمان', 'flag' => '🇴🇲'],
+    '974' => ['name' => 'قطر', 'flag' => '🇶🇦'],
+    '965' => ['name' => 'الكويت', 'flag' => '🇰🇼'],
+    '1'   => ['name' => 'أمريكا/كندا', 'flag' => '🇺🇸🇨🇦'],
+    '44'  => ['name' => 'بريطانيا', 'flag' => '🇬🇧'],
+    '91'  => ['name' => 'الهند', 'flag' => '🇮🇳'],
+    '92'  => ['name' => 'باكستان', 'flag' => '🇵🇰'],
+    '90'  => ['name' => 'تركيا', 'flag' => '🇹🇷'],
+    '49'  => ['name' => 'ألمانيا', 'flag' => '🇩🇪'],
+    '33'  => ['name' => 'فرنسا', 'flag' => '🇫🇷'],
+    '34'  => ['name' => 'إسبانيا', 'flag' => '🇪🇸'],
+    '39'  => ['name' => 'إيطاليا', 'flag' => '🇮🇹'],
+    '7'   => ['name' => 'روسيا', 'flag' => '🇷🇺'],
+    '81'  => ['name' => 'اليابان', 'flag' => '🇯🇵'],
+    '86'  => ['name' => 'الصين', 'flag' => '🇨🇳'],
+    '66'  => ['name' => 'تايلاند', 'flag' => '🇹🇭'],
+];
+
+// إنشاء الجداول وإدخال الدول
 $db->exec("
 CREATE TABLE IF NOT EXISTS countries (
     code TEXT PRIMARY KEY, 
@@ -63,85 +104,74 @@ CREATE TABLE IF NOT EXISTS sent_codes (
 );
 ");
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 🌍 الدول المدعومة
-// ═══════════════════════════════════════════════════════════════════════════
-$popularCountries = [
-    '967' => ['name' => 'اليمن', 'flag' => '🇾🇪', 'color' => '🔴'],
-    '966' => ['name' => 'السعودية', 'flag' => '🇸🇦', 'color' => '🟢'],
-    '20'  => ['name' => 'مصر', 'flag' => '🇪🇬', 'color' => '🔴🟡'],
-    '213' => ['name' => 'الجزائر', 'flag' => '🇩🇿', 'color' => '🟢🔴'],
-    '212' => ['name' => 'المغرب', 'flag' => '🇲🇦', 'color' => '🔴🟢'],
-    '216' => ['name' => 'تونس', 'flag' => '🇹🇳', 'color' => '🔴⚪'],
-    '218' => ['name' => 'ليبيا', 'flag' => '🇱🇾', 'color' => '🟢⚫🔴'],
-    '964' => ['name' => 'العراق', 'flag' => '🇮🇶', 'color' => '🔴⚪⚫🟢'],
-    '962' => ['name' => 'الأردن', 'flag' => '🇯🇴', 'color' => '⚫⚪🟢🔴'],
-    '961' => ['name' => 'لبنان', 'flag' => '🇱🇧', 'color' => '🔴⚪🟢'],
-    '970' => ['name' => 'فلسطين', 'flag' => '🇵🇸', 'color' => '⚫⚪🟢🔴'],
-    '66' => ['name' => 'تايلاند', 'flag' => '🇹🇭', 'color' => '🟢⚪⚫🔴'],
-    '968' => ['name' => 'عمان', 'flag' => '🇴🇲', 'color' => '🔴⚪🟢'],
-    '974' => ['name' => 'قطر', 'flag' => '🇶🇦', 'color' => '🤍💜'],
-    '965' => ['name' => 'الكويت', 'flag' => '🇰🇼', 'color' => '🟢🔴⚪⚫'],
-    '1'   => ['name' => 'أمريكا/كندا', 'flag' => '🇺🇸🇨🇦', 'color' => '🔴⚪🔵'],
-];
-
-foreach ($popularCountries as $code => $info) {
-    $stmt = $db->prepare("INSERT OR IGNORE INTO countries (code, name, flag) VALUES (?, ?, ?)");
+// إعادة تعبئة جدول الدول بشكل آمن
+$stmt = $db->prepare("INSERT OR IGNORE INTO countries (code, name, flag) VALUES (?, ?, ?)");
+foreach ($masterCountriesList as $code => $info) {
     $stmt->execute([$code, $info['name'], $info['flag']]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 🎨 دوال التنسيق الفخم
 // ═══════════════════════════════════════════════════════════════════════════
-
-function fancyHeader($title, $icon = '✨') {
-    return "
-╔════════════════════════════════════════╗
-║  {$icon} <b>" . strtoupper($title) . "</b> {$icon}  ║
-╠════════════════════════════════════════╣
-";
-}
-
-function fancyFooter() {
-    return "
-╚════════════════════════════════════════╝
-⚡ <i>" . FOOTER_TEXT . "</i> ⚡";
-}
-
-function fancyMessage($title, $content, $icon = '📌') {
-    return fancyHeader($title, $icon) . $content . fancyFooter();
-}
-
-function formatPhone($phone) {
-    return "📞 <code>" . htmlspecialchars($phone) . "</code>";
-}
-
-function formatCode($code) {
-    return "🔑 <code>" . htmlspecialchars($code) . "</code>";
-}
-
-function formatPassword($pass) {
-    return "🔐 <code>" . htmlspecialchars($pass) . "</code>";
-}
-
-function formatDate() {
-    return "🕒 <i>" . date('Y-m-d | h:i:s A') . "</i>";
-}
+function fancyHeader($title, $icon = '✨') { return "\n╔════════════════════════════════════════╗\n║  {$icon} <b>" . strtoupper($title) . "</b> {$icon}  ║\n╠════════════════════════════════════════╣\n"; }
+function fancyFooter() { return "\n╚════════════════════════════════════════╝\n⚡ <i>" . FOOTER_TEXT . "</i> ⚡"; }
+function fancyMessage($title, $content, $icon = '📌') { return fancyHeader($title, $icon) . $content . fancyFooter(); }
+function formatPhone($phone) { return "📞 <code>" . htmlspecialchars($phone) . "</code>"; }
+function formatCode($code) { return "🔑 <code>" . htmlspecialchars($code) . "</code>"; }
+function formatPassword($pass) { return "🔐 <code>" . htmlspecialchars($pass) . "</code>"; }
+function formatDate() { return "🕒 <i>" . date('Y-m-d | h:i:s A') . "</i>"; }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 🔧 دوال مساعدة
+// 🔧 دوال مساعدة محدثة
 // ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * دالة ذكية لاستخراج رمز الدولة من أي صيغة رقم
+ * تدعم: +967... , 967... , 00967...
+ */
+function extractCountryCode($rawPhone) {
+    // 1. إزالة أي مسافات أو شرطات أو أقواس
+    $cleanPhone = preg_replace('/[^\d+]/', '', $rawPhone);
+    
+    // 2. التحقق من وجود علامة "+"
+    if (strpos($cleanPhone, '+') === 0) {
+        if (preg_match('/^\+(\d{1,4})/', $cleanPhone, $matches)) {
+            return $matches[1];
+        }
+    }
+    
+    // 3. التحقق من صيغة 00xx (معاملات دولية)
+    if (preg_match('/^00(\d{1,4})/', $cleanPhone, $matches)) {
+        return $matches[1];
+    }
+    
+    // 4. التحقق من أنها أرقام فقط (قد تكون بدون رمز دولي)
+    if (preg_match('/^\d+$/', $cleanPhone)) {
+        // محاولة استخراج أطول رمز دولة تطابق من بداية الرقم
+        $codes = array_keys($GLOBALS['masterCountriesList']);
+        usort($codes, function($a, $b) { return strlen($b) - strlen($a); }); // ترتيب تنازلي
+        
+        foreach ($codes as $code) {
+            if (strpos($cleanPhone, $code) === 0) {
+                return $code;
+            }
+        }
+    }
+    
+    return null;
+}
 
 function getCountryByPhone($phone, $db) {
-    if (preg_match('/^\+(\d{1,4})/', $phone, $matches)) {
-        $code = $matches[1];
-        $stmt = $db->prepare("SELECT code, name, flag FROM countries WHERE code = ?");
-        $stmt->execute([$code]);
-        $country = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($country) return $country;
+    $countryCode = extractCountryCode($phone);
+    if (!$countryCode) {
         return null;
     }
-    return null;
+    
+    $stmt = $db->prepare("SELECT code, name, flag FROM countries WHERE code = ?");
+    $stmt->execute([$countryCode]);
+    $country = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    return $country ?: null;
 }
 
 function botApi($method, $params) {
