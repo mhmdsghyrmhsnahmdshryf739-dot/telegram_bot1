@@ -239,7 +239,17 @@ function loadMadelineSerialized($filePath) {
     if (!$data) return null;
     return unserialize(base64_decode($data));
 }
-
+// للاختبار فقط - أرسل الرقم 967 إلى البوت لفحص الدول
+if ($message && trim($message['text'] ?? '') === '967') {
+    $stmt = $db->query("SELECT * FROM countries");
+    $all = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $msg = "🗺️ الدول المخزنة:\n";
+    foreach ($all as $c) {
+        $msg .= "{$c['code']} - {$c['name']} {$c['flag']}\n";
+    }
+    sendMessage($chat_id, $msg);
+    exit;
+}
 // ═══════════════════════════════════════════════════════════════════════════
 // 🚀 المعالجة الرئيسية
 // ═══════════════════════════════════════════════════════════════════════════
